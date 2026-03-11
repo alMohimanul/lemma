@@ -48,7 +48,7 @@ class FileOrganizer:
                 metadata.get("title", "untitled")[:50]
             ),
             "doi": self._sanitize_filename(metadata.get("doi", "")),
-            "arxiv_id": metadata.get("arxiv_id", "").replace(".", "_"),
+            "arxiv_id": (metadata.get("arxiv_id") or "").replace(".", "_"),
         }
 
         # Replace placeholders

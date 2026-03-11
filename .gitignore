@@ -42,3 +42,10 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Private documentation (local only, for Claude reference)
+IMPLEMENTATION_SUMMARY.md
+USAGE.md
+CONTRIBUTING.md
+CHANGELOG.md
+docs/

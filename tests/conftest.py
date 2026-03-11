@@ -59,5 +59,12 @@ startxref
 
 @pytest.fixture
 def test_db_path(temp_dir):
-    """Create a temporary database path."""
-    return str(temp_dir / "test_lemma.db")
+    """Create a temporary database path with proper cleanup."""
+    db_path = str(temp_dir / "test_lemma.db")
+    yield db_path
+
+    # Ensure all SQLAlchemy connections are closed before cleanup
+    # This prevents Windows file locking issues if we add Windows support later
+    import gc
+
+    gc.collect()  # Force garbage collection to close any lingering connections

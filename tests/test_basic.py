@@ -33,9 +33,9 @@ def test_repository_basic(test_db_path):
     """Test basic repository initialization."""
     from lemma.db.repository import Repository
 
-    repo = Repository(test_db_path)
-    all_papers = repo.list_papers()
-    assert isinstance(all_papers, list)
+    with Repository(test_db_path) as repo:
+        all_papers = repo.list_papers()
+        assert isinstance(all_papers, list)
 
 
 def test_encoder_basic():

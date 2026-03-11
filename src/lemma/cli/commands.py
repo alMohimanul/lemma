@@ -606,9 +606,17 @@ def organize(db: str, dry_run: bool, pattern: str):
         output.print_info("No papers found in database")
         return
 
-    # Convert to dicts for organizer
+    # Convert to dicts for organizer, filtering out missing files
     paper_dicts = []
+    missing_count = 0
     for paper in papers:
+        # Check if file exists on disk
+        from pathlib import Path
+
+        if not Path(paper.file_path).exists():
+            missing_count += 1
+            continue
+
         paper_dicts.append(
             {
                 "id": paper.id,
@@ -619,6 +627,12 @@ def organize(db: str, dry_run: bool, pattern: str):
                 "doi": paper.doi,
                 "arxiv_id": paper.arxiv_id,
             }
+        )
+
+    if missing_count > 0:
+        output.print_warning(
+            f"Skipping {missing_count} paper(s) with missing files. "
+            f"Run 'lemma verify' to clean up the database."
         )
 
     # Preview renames
@@ -745,6 +759,96 @@ def organize(db: str, dry_run: bool, pattern: str):
     if success_count > 0:
         output.print_success("Files have been organized!")
         output.print_info("Use the database logs to rollback if needed")
+
+
+@cli.command()
+@click.option("--db", default="~/.lemma/lemma.db", help="Database path")
+@click.option(
+    "--remove", is_flag=True, help="Remove stale entries (default: just report)"
+)
+def verify(db: str, remove: bool):
+    """Verify database integrity and clean up stale entries.
+
+    Checks all papers in the database to see if their files still exist on disk.
+    Use --remove to delete stale entries.
+    """
+    from rich.table import Table
+
+    repo = Repository(db)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        transient=True,
+    ) as progress:
+        task = progress.add_task("Checking files...", total=None)
+        papers = repo.list_papers(limit=10000)
+        progress.update(task, completed=True)
+
+    if not papers:
+        output.print_info("No papers found in database")
+        return
+
+    # Check each paper
+    missing_papers = []
+    for paper in papers:
+        from pathlib import Path
+
+        if not Path(paper.file_path).exists():
+            missing_papers.append(paper)
+
+    if not missing_papers:
+        output.print_success(f"✓ All {len(papers)} papers have valid file paths!")
+        return
+
+    # Display missing papers
+    table = Table(title=f"Missing Files ({len(missing_papers)} found)")
+    table.add_column("ID", justify="right", style="cyan")
+    table.add_column("Title", style="white", max_width=40)
+    table.add_column("File Path", style="red", max_width=50)
+
+    for paper in missing_papers[:20]:  # Show first 20
+        table.add_row(
+            str(paper.id),
+            (paper.title or "Untitled")[:40],
+            str(paper.file_path)[-50:],
+        )
+
+    output.console.print(table)
+
+    if len(missing_papers) > 20:
+        output.print_info(f"\n... and {len(missing_papers) - 20} more missing files")
+
+    output.print_warning(
+        f"\nFound {len(missing_papers)} stale database entries "
+        f"(out of {len(papers)} total papers)"
+    )
+
+    # Remove if requested
+    if remove:
+        if not click.confirm("\nRemove these stale entries from the database?"):
+            output.print_info("Operation cancelled")
+            return
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            transient=False,
+        ) as progress:
+            task = progress.add_task(
+                f"Removing {len(missing_papers)} stale entries...",
+                total=len(missing_papers),
+            )
+
+            for paper in missing_papers:
+                repo.delete_paper(paper.id)
+                progress.advance(task)
+
+        output.print_success(
+            f"✓ Removed {len(missing_papers)} stale entries from database"
+        )
+    else:
+        output.print_info("\nRun with --remove to delete these entries")
 
 
 def main():

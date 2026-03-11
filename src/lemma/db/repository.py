@@ -40,6 +40,19 @@ class Repository:
         """Get a new database session."""
         return self.Session()
 
+    def close(self) -> None:
+        """Close all database connections and dispose of the engine."""
+        self.engine.dispose()
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensures cleanup."""
+        self.close()
+        return False
+
     # Paper operations
     def add_paper(
         self,
@@ -134,6 +147,18 @@ class Repository:
         with self.get_session() as session:
             session.query(Paper).filter(Paper.id == paper_id).update(metadata)
             session.commit()
+
+    def delete_paper(self, paper_id: int) -> None:
+        """Delete a paper and all its related data (embeddings, citations, etc.).
+
+        Args:
+            paper_id: ID of the paper to delete
+        """
+        with self.get_session() as session:
+            paper = session.query(Paper).filter(Paper.id == paper_id).first()
+            if paper:
+                session.delete(paper)  # Cascades to embeddings, citations, logs
+                session.commit()
 
     def get_papers_for_embedding(self, force: bool = False) -> List[Paper]:
         """Get papers that need embeddings generated.

@@ -9,9 +9,11 @@ from ..core.scanner import PDFScanner
 from ..core.extractor import MetadataExtractor
 from ..db.repository import Repository
 from . import output
+from .setup_wizard import run_setup_wizard, is_first_run
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file and ~/.lemma/.env
+load_dotenv()  # Load from current directory
+load_dotenv(Path.home() / ".lemma" / ".env")  # Load from config directory
 
 
 @click.group()
@@ -762,6 +764,15 @@ def organize(db: str, dry_run: bool, pattern: str):
 
 
 @cli.command()
+def setup():
+    """Run the setup wizard to configure API keys.
+
+    Configure your LLM provider API keys for AI-powered features.
+    """
+    run_setup_wizard(skip_if_configured=False)
+
+
+@cli.command()
 @click.option("--db", default="~/.lemma/lemma.db", help="Database path")
 @click.option(
     "--remove", is_flag=True, help="Remove stale entries (default: just report)"
@@ -853,6 +864,10 @@ def verify(db: str, remove: bool):
 
 def main():
     """Entry point for the CLI."""
+    # Run first-time setup wizard if needed
+    if is_first_run():
+        run_setup_wizard(skip_if_configured=True)
+
     cli()
 
 

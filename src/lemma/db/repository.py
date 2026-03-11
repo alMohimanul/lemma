@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine, desc, or_
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from .models import (
     Base,
@@ -18,6 +19,9 @@ from .models import (
     FileOperation,
     Config,
 )
+from ..utils.logger import get_logger, log_exception
+
+logger = get_logger(__name__)
 
 
 class Repository:
@@ -60,7 +64,7 @@ class Repository:
         file_hash: str,
         file_size: int,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> Paper:
+    ) -> Optional[Paper]:
         """Add a new paper to the database.
 
         Args:
@@ -70,19 +74,29 @@ class Repository:
             metadata: Optional metadata dict (title, authors, year, etc.)
 
         Returns:
-            Created Paper object
+            Created Paper object, or None if operation failed
         """
         with self.get_session() as session:
-            paper = Paper(
-                file_path=file_path,
-                file_hash=file_hash,
-                file_size=file_size,
-                **(metadata or {}),
-            )
-            session.add(paper)
-            session.commit()
-            session.refresh(paper)
-            return paper
+            try:
+                paper = Paper(
+                    file_path=file_path,
+                    file_hash=file_hash,
+                    file_size=file_size,
+                    **(metadata or {}),
+                )
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+                logger.info(f"Added paper: {paper.title or file_path}")
+                return paper
+            except IntegrityError as e:
+                session.rollback()
+                logger.warning(f"Duplicate paper detected (hash: {file_hash}): {e}")
+                return None
+            except SQLAlchemyError as e:
+                session.rollback()
+                log_exception(logger, f"Failed to add paper {file_path}", e)
+                return None
 
     def get_paper_by_hash(self, file_hash: str) -> Optional[Paper]:
         """Find paper by content hash."""
@@ -142,23 +156,51 @@ class Repository:
                 .all()
             )
 
-    def update_paper_metadata(self, paper_id: int, metadata: Dict[str, Any]) -> None:
-        """Update paper metadata fields."""
-        with self.get_session() as session:
-            session.query(Paper).filter(Paper.id == paper_id).update(metadata)
-            session.commit()
+    def update_paper_metadata(self, paper_id: int, metadata: Dict[str, Any]) -> bool:
+        """Update paper metadata fields.
 
-    def delete_paper(self, paper_id: int) -> None:
+        Args:
+            paper_id: ID of paper to update
+            metadata: Dictionary of fields to update
+
+        Returns:
+            True if update successful, False otherwise
+        """
+        with self.get_session() as session:
+            try:
+                session.query(Paper).filter(Paper.id == paper_id).update(metadata)
+                session.commit()
+                logger.info(f"Updated metadata for paper ID {paper_id}")
+                return True
+            except SQLAlchemyError as e:
+                session.rollback()
+                log_exception(logger, f"Failed to update paper {paper_id}", e)
+                return False
+
+    def delete_paper(self, paper_id: int) -> bool:
         """Delete a paper and all its related data (embeddings, citations, etc.).
 
         Args:
             paper_id: ID of the paper to delete
+
+        Returns:
+            True if deletion successful, False otherwise
         """
         with self.get_session() as session:
-            paper = session.query(Paper).filter(Paper.id == paper_id).first()
-            if paper:
-                session.delete(paper)  # Cascades to embeddings, citations, logs
-                session.commit()
+            try:
+                paper = session.query(Paper).filter(Paper.id == paper_id).first()
+                if paper:
+                    session.delete(paper)  # Cascades to embeddings, citations, logs
+                    session.commit()
+                    logger.info(f"Deleted paper ID {paper_id}")
+                    return True
+                else:
+                    logger.warning(f"Paper ID {paper_id} not found for deletion")
+                    return False
+            except SQLAlchemyError as e:
+                session.rollback()
+                log_exception(logger, f"Failed to delete paper {paper_id}", e)
+                return False
 
     def get_papers_for_embedding(self, force: bool = False) -> List[Paper]:
         """Get papers that need embeddings generated.

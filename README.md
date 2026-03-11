@@ -18,10 +18,10 @@
 
 ```bash
 # Install via pip
-pip install lemma
+pip install lemma-ai
 
 # Or with pipx (recommended for CLI tools)
-pipx install lemma
+pipx install lemma-ai
 ```
 
 ## Quick Start
@@ -97,5 +97,5 @@ MIT License - see LICENSE file for details
 
 ## Support
 
-- Report issues: [GitHub Issues](https://github.com/yourusername/lemma/issues)
+- Report issues: [GitHub Issues](https://github.com/alMohimanul/lemma/issues)
 - Questions: Open a discussion on GitHub

@@ -49,3 +49,10 @@ USAGE.md
 CONTRIBUTING.md
 CHANGELOG.md
 docs/
+
+# Lemma runtime files
+*.log
+app.log
+
+# Build artifacts
+src/*.egg-info

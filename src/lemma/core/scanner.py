@@ -4,6 +4,10 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
 
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class ScannedFile:
@@ -103,12 +107,19 @@ class PDFScanner:
 
         Returns:
             Hex-encoded SHA256 hash
+
+        Raises:
+            IOError: If file cannot be read
         """
         sha256 = hashlib.sha256()
 
-        with open(file_path, "rb") as f:
-            while chunk := f.read(self.CHUNK_SIZE):
-                sha256.update(chunk)
+        try:
+            with open(file_path, "rb") as f:
+                while chunk := f.read(self.CHUNK_SIZE):
+                    sha256.update(chunk)
+        except (OSError, IOError, PermissionError) as e:
+            logger.error(f"Failed to compute hash for {file_path}: {e}")
+            raise IOError(f"Cannot read file {file_path}: {e}") from e
 
         return sha256.hexdigest()
 

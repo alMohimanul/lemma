@@ -5,14 +5,14 @@ with open("README.md", "r", encoding="utf-8") as f:
     long_description = f.read()
 
 setup(
-    name="lemma",
+    name="lemma-ai",
     version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Mahir",
+    author_email="aislam192054@gmail.com",
     description="Local-first paper manager with semantic search and LLM reasoning",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/lemma",
+    url="https://github.com/alMohimanul/lemma",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     classifiers=[

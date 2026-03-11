@@ -9,6 +9,10 @@ try:
 except ImportError:
     faiss = None
 
+from ..utils.logger import get_logger, log_exception
+
+logger = get_logger(__name__)
+
 
 class SemanticSearchIndex:
     """FAISS-based vector index for semantic paper search."""
@@ -126,50 +130,79 @@ class SemanticSearchIndex:
         sorted_papers = sorted(paper_scores.items(), key=lambda x: x[1])
         return sorted_papers[:top_k]
 
-    def save(self, index_path: Optional[Path] = None):
+    def save(self, index_path: Optional[Path] = None) -> bool:
         """Save index to disk.
 
         Args:
             index_path: Path to save index (uses self.index_path if not provided)
+
+        Returns:
+            True if save successful, False otherwise
         """
         path_to_use = index_path if index_path is not None else self.index_path
         if path_to_use is None:
             raise ValueError("No index path provided")
         save_path = Path(path_to_use).expanduser()
-        save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save FAISS index
-        faiss.write_index(self.index, str(save_path.with_suffix(".faiss")))
+        try:
+            save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save ID mapping
-        with open(save_path.with_suffix(".pkl"), "wb") as f:
-            pickle.dump(self.id_map, f)
+            # Save FAISS index
+            faiss.write_index(self.index, str(save_path.with_suffix(".faiss")))
 
-    def load(self, index_path: Optional[Path] = None):
+            # Save ID mapping
+            with open(save_path.with_suffix(".pkl"), "wb") as f:
+                pickle.dump(self.id_map, f)
+
+            logger.info(f"Saved search index to {save_path}")
+            return True
+        except (OSError, IOError, PermissionError) as e:
+            log_exception(logger, f"Failed to save index to {save_path}", e)
+            return False
+        except Exception as e:
+            log_exception(logger, f"Unexpected error saving index to {save_path}", e)
+            return False
+
+    def load(self, index_path: Optional[Path] = None) -> bool:
         """Load index from disk.
 
         Args:
             index_path: Path to load from (uses self.index_path if not provided)
+
+        Returns:
+            True if load successful, False otherwise
         """
         path_to_use = index_path if index_path is not None else self.index_path
         if path_to_use is None:
             raise ValueError("No index path provided")
         load_path = Path(path_to_use).expanduser()
 
-        # Load FAISS index
-        faiss_path = load_path.with_suffix(".faiss")
-        if not faiss_path.exists():
-            raise FileNotFoundError(f"FAISS index not found: {faiss_path}")
+        try:
+            # Load FAISS index
+            faiss_path = load_path.with_suffix(".faiss")
+            if not faiss_path.exists():
+                logger.warning(f"FAISS index not found: {faiss_path}")
+                return False
 
-        self.index = faiss.read_index(str(faiss_path))
+            self.index = faiss.read_index(str(faiss_path))
 
-        # Load ID mapping
-        pkl_path = load_path.with_suffix(".pkl")
-        if pkl_path.exists():
-            with open(pkl_path, "rb") as f:
-                self.id_map = pickle.load(f)
-        else:
-            self.id_map = []
+            # Load ID mapping
+            pkl_path = load_path.with_suffix(".pkl")
+            if pkl_path.exists():
+                with open(pkl_path, "rb") as f:
+                    self.id_map = pickle.load(f)
+            else:
+                self.id_map = []
+                logger.warning(f"ID mapping not found at {pkl_path}, using empty list")
+
+            logger.info(f"Loaded search index from {load_path} ({self.size()} vectors)")
+            return True
+        except (OSError, IOError, PermissionError) as e:
+            log_exception(logger, f"Failed to load index from {load_path}", e)
+            return False
+        except Exception as e:
+            log_exception(logger, f"Unexpected error loading index from {load_path}", e)
+            return False
 
     def size(self) -> int:
         """Get number of vectors in the index."""

@@ -4,6 +4,10 @@ import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+from ..utils.logger import get_logger, log_exception
+
+logger = get_logger(__name__)
+
 
 class FileOrganizer:
     """Organize PDF files with pattern-based renaming and rollback."""
@@ -86,11 +90,15 @@ class FileOrganizer:
             raise FileNotFoundError(f"File not found: {original_path}")
 
         # Determine target directory
-        if target_dir:
-            target_dir = Path(target_dir).expanduser().resolve()
-            target_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            target_dir = original_path.parent
+        try:
+            if target_dir:
+                target_dir = Path(target_dir).expanduser().resolve()
+                target_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                target_dir = original_path.parent
+        except (OSError, PermissionError) as e:
+            logger.error(f"Failed to create target directory {target_dir}: {e}")
+            raise IOError(f"Cannot create directory {target_dir}: {e}") from e
 
         # Build new path
         new_path = target_dir / new_filename
@@ -109,8 +117,13 @@ class FileOrganizer:
             return new_path
 
         # Perform rename/move
-        shutil.move(str(original_path), str(new_path))
-        return new_path
+        try:
+            shutil.move(str(original_path), str(new_path))
+            logger.info(f"Renamed file: {original_path.name} -> {new_path.name}")
+            return new_path
+        except (OSError, PermissionError, shutil.Error) as e:
+            log_exception(logger, f"Failed to move {original_path} to {new_path}", e)
+            raise IOError(f"Cannot move file {original_path} to {new_path}: {e}") from e
 
     def rollback_operation(self, original_path: Path, new_path: Path) -> bool:
         """Rollback a rename operation.
@@ -136,12 +149,19 @@ class FileOrganizer:
             print(f"[DRY RUN] Would rollback: {new_path} -> {original_path}")
             return True
 
-        # Ensure parent directory exists
-        original_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            # Ensure parent directory exists
+            original_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Perform rollback
-        shutil.move(str(new_path), str(original_path))
-        return True
+            # Perform rollback
+            shutil.move(str(new_path), str(original_path))
+            logger.info(f"Rolled back file: {new_path.name} -> {original_path.name}")
+            return True
+        except (OSError, PermissionError, shutil.Error) as e:
+            log_exception(
+                logger, f"Failed to rollback {new_path} to {original_path}", e
+            )
+            return False
 
     def _extract_first_author(self, authors: str) -> str:
         """Extract first author's last name from author string.

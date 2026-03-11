@@ -18,6 +18,7 @@ from .models import (
     ProcessingLog,
     FileOperation,
     Config,
+    Note,
 )
 from ..utils.logger import get_logger, log_exception
 
@@ -477,3 +478,116 @@ class Repository:
                 session.add(config)
 
             session.commit()
+
+    # Note operations
+    def add_note(
+        self,
+        question: str,
+        answer: str,
+        paper_ids: str,
+        sources: Optional[str] = None,
+        formatted_note: Optional[str] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        tokens_used: Optional[int] = None,
+    ) -> Optional[Note]:
+        """Add a new note to the database.
+
+        Args:
+            question: Question text
+            answer: Answer text
+            paper_ids: JSON string of paper IDs
+            sources: Optional JSON string of sources
+            formatted_note: Optional LLM-formatted note
+            provider: LLM provider name
+            model: Model name
+            tokens_used: Token count
+
+        Returns:
+            Created Note object, or None on error
+        """
+        import logging
+        from sqlalchemy.exc import SQLAlchemyError
+
+        logger = logging.getLogger(__name__)
+
+        with self.get_session() as session:
+            try:
+                note = Note(
+                    question=question,
+                    answer=answer,
+                    paper_ids=paper_ids,
+                    sources=sources,
+                    formatted_note=formatted_note,
+                    provider=provider,
+                    model=model,
+                    tokens_used=tokens_used,
+                )
+                session.add(note)
+                session.commit()
+                session.refresh(note)
+                logger.info(f"Saved note {note.id}: {question[:50]}...")
+                return note
+            except SQLAlchemyError as e:
+                session.rollback()
+                logger.error(f"Failed to save note: {e}", exc_info=True)
+                return None
+
+    def get_note_by_id(self, note_id: int) -> Optional[Note]:
+        """Get a note by ID.
+
+        Args:
+            note_id: Note ID
+
+        Returns:
+            Note object or None if not found
+        """
+        with self.get_session() as session:
+            return session.query(Note).filter(Note.id == note_id).first()
+
+    def list_notes(self, limit: int = 100, offset: int = 0) -> List[Note]:
+        """List notes with pagination, ordered by creation date (newest first).
+
+        Args:
+            limit: Maximum number of notes to return
+            offset: Number of notes to skip
+
+        Returns:
+            List of Note objects
+        """
+        with self.get_session() as session:
+            return (
+                session.query(Note)
+                .order_by(desc(Note.created_at))
+                .limit(limit)
+                .offset(offset)
+                .all()
+            )
+
+    def delete_note(self, note_id: int) -> bool:
+        """Delete a note by ID.
+
+        Args:
+            note_id: Note ID
+
+        Returns:
+            True if deleted, False if not found
+        """
+        import logging
+        from sqlalchemy.exc import SQLAlchemyError
+
+        logger = logging.getLogger(__name__)
+
+        with self.get_session() as session:
+            try:
+                note = session.query(Note).filter(Note.id == note_id).first()
+                if note:
+                    session.delete(note)
+                    session.commit()
+                    logger.info(f"Deleted note {note_id}")
+                    return True
+                return False
+            except SQLAlchemyError as e:
+                session.rollback()
+                logger.error(f"Failed to delete note {note_id}: {e}", exc_info=True)
+                return False

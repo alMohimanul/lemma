@@ -152,3 +152,23 @@ class Config(Base):
     key = Column(String(128), primary_key=True)
     value = Column(Text)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Note(Base):
+    """Saved Q&A notes for literature review."""
+
+    __tablename__ = "notes"
+
+    id = Column(Integer, primary_key=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    formatted_note = Column(Text)  # LLM-formatted note for literature review
+    paper_ids = Column(Text, nullable=False)  # JSON array of paper IDs used
+    sources = Column(Text)  # JSON array of source strings
+    provider = Column(String(32))  # LLM provider used (groq, gemini, cache)
+    model = Column(String(64))  # Model name
+    tokens_used = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<Note(id={self.id}, question='{self.question[:50]}...', created_at={self.created_at})>"

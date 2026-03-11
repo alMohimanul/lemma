@@ -173,3 +173,58 @@ Provide:
 Summary:"""
 
     return prompt
+
+
+def build_note_formatting_prompt(
+    question: str, answer: str, context_papers: List[Dict[str, Any]]
+) -> str:
+    """Build a prompt for formatting Q&A into a literature review note.
+
+    Args:
+        question: Original question
+        answer: LLM-generated answer
+        context_papers: List of papers used to answer
+
+    Returns:
+        Formatted prompt string
+    """
+    # Format papers list
+    papers_list = []
+    for i, paper in enumerate(context_papers, 1):
+        papers_list.append(
+            f"[{paper.get('id')}] {paper.get('title', 'Untitled')} "
+            f"({paper.get('authors', 'Unknown')}, {paper.get('year', 'N/A')})"
+        )
+    papers_text = "\n".join(papers_list)
+
+    prompt = f"""You are helping a researcher prepare literature review notes. Transform the following Q&A into a well-structured note suitable for academic writing.
+
+ORIGINAL QUESTION:
+{question}
+
+ANSWER:
+{answer}
+
+PAPERS REFERENCED:
+{papers_text}
+
+Format the note with these sections:
+
+## Key Findings
+- Main insights from the answer (2-4 bullet points)
+
+## Relevant Papers
+- List papers with their key contributions to this question
+
+## Methodology Insights (if applicable)
+- Methods or approaches mentioned
+
+## Direct Evidence
+- Important quotes or specific findings worth citing
+- Include paper IDs like [1] for citations
+
+Keep the note concise (200-300 words), focused on actionable insights for writing a literature review. Use academic tone but remain clear and direct.
+
+FORMATTED NOTE:"""
+
+    return prompt

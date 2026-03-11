@@ -3,6 +3,8 @@ from pathlib import Path
 
 import click
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.panel import Panel
+from rich import box
 from dotenv import load_dotenv
 
 from ..core.scanner import PDFScanner
@@ -166,14 +168,115 @@ def search(query: str, db: str):
     output.print_search_results(paper_dicts, query)
 
 
-@cli.command()
+@cli.command(name="show")
+@click.argument("item_id", type=int, required=False)
+@click.option("--paper", "-p", type=int, help="Show paper by ID")
+@click.option("--note", "-n", type=int, help="Show note by ID")
+@click.option("--db", default="~/.lemma/lemma.db", help="Database path")
+def show(item_id: int, paper: int, note: int, db: str):
+    """Show detailed information about a paper or note.
+
+    ITEM_ID: ID to display (defaults to paper)
+
+    Examples:
+      lemma show 5        # Show paper 5
+      lemma show -n 3     # Show note 3
+      lemma show --note 3 # Show note 3
+    """
+    from ..core.notes import NoteManager
+
+    repo = Repository(db)
+
+    # Determine what to show
+    if note is not None:
+        # Show note
+        note_manager = NoteManager()
+
+        # Validate note ID
+        try:
+            note_manager.validate_note_id(note)
+        except ValueError as e:
+            output.print_error(str(e))
+            return
+
+        # Fetch note
+        try:
+            note_obj = repo.get_note_by_id(note)
+        except Exception as e:
+            output.print_error(f"Failed to fetch note: {e}")
+            return
+
+        if not note_obj:
+            output.print_error(f"Note with ID {note} not found")
+            output.print_info("Use 'lemma notes' to see available notes")
+            return
+
+        # Convert note to dict for formatting
+        note_dict = {
+            "id": note_obj.id,
+            "question": note_obj.question,
+            "answer": note_obj.answer,
+            "formatted_note": note_obj.formatted_note,
+            "sources": note_obj.sources,
+            "provider": note_obj.provider,
+            "model": note_obj.model,
+            "tokens_used": note_obj.tokens_used,
+            "created_at": note_obj.created_at,
+        }
+
+        # Format and display
+        formatted_output = note_manager.format_note_display(note_dict)
+
+        output.console.print(
+            Panel(
+                formatted_output,
+                title=f"[bold cyan]Note #{note}[/bold cyan]",
+                border_style="cyan",
+                box=box.ROUNDED,
+            )
+        )
+
+    elif paper is not None or item_id is not None:
+        # Show paper
+        paper_id = paper if paper is not None else item_id
+
+        paper_obj = repo.get_paper_by_id(paper_id)
+
+        if not paper_obj:
+            output.print_error(f"Paper with ID {paper_id} not found")
+            return
+
+        # Convert to dict for display
+        paper_dict = {
+            "id": paper_obj.id,
+            "title": paper_obj.title,
+            "authors": paper_obj.authors,
+            "year": paper_obj.year,
+            "publication": paper_obj.publication,
+            "doi": paper_obj.doi,
+            "arxiv_id": paper_obj.arxiv_id,
+            "abstract": paper_obj.abstract,
+            "file_path": paper_obj.file_path,
+            "file_size": paper_obj.file_size,
+            "indexed_at": paper_obj.indexed_at.strftime("%Y-%m-%d %H:%M:%S")
+            if paper_obj.indexed_at
+            else None,
+            "embedding_status": paper_obj.embedding_status,
+        }
+
+        output.print_paper_details(paper_dict)
+
+    else:
+        output.print_error("Please provide an ID to show")
+        output.print_info("Usage: lemma show <id>  OR  lemma show -n <note_id>")
+
+
+# Keep 'info' as alias for backwards compatibility
+@cli.command(name="info", hidden=True)
 @click.argument("paper_id", type=int)
 @click.option("--db", default="~/.lemma/lemma.db", help="Database path")
 def info(paper_id: int, db: str):
-    """Show detailed information about a paper.
-
-    PAPER_ID: ID of the paper to display
-    """
+    """Show detailed information about a paper (alias for 'show')."""
     repo = Repository(db)
     paper = repo.get_paper_by_id(paper_id)
 
@@ -207,12 +310,15 @@ def info(paper_id: int, db: str):
 @click.option("--db", default="~/.lemma/lemma.db", help="Database path")
 @click.option("--top-k", type=int, default=5, help="Number of papers to retrieve")
 @click.option("--index-path", default="~/.lemma/search.index", help="FAISS index path")
-def ask(question: str, db: str, top_k: int, index_path: str):
+@click.option("--save", "-s", is_flag=True, help="Automatically save answer as a note")
+def ask(question: str, db: str, top_k: int, index_path: str, save: bool):
     """Ask a question across all papers (semantic search + LLM).
 
     QUESTION: Your question about the papers
 
     Note: Requires embeddings to be generated first. Run 'lemma embed' if needed.
+
+    Use --save or -s to automatically save the answer as a formatted note.
     """
     from ..embeddings.encoder import EmbeddingEncoder
     from ..embeddings.search import SemanticSearchIndex
@@ -382,6 +488,27 @@ def ask(question: str, db: str, top_k: int, index_path: str):
         else:
             output.print_info("\n[Cached response]")
 
+        # Store session context for note saving
+        session_data = {
+            "question": question,
+            "answer": response.text,
+            "paper_ids": [p["id"] for p in context_papers],
+            "sources": sources,
+            "context_papers": context_papers,
+            "provider": response.provider,
+            "model": response.model,
+            "tokens_used": response.tokens_used,
+        }
+        repo.set_config("last_qa_session", session_data)
+
+        # Auto-save note if --save flag is set
+        if save:
+            _save_note_from_session(repo, session_data)
+        else:
+            output.print_info(
+                "\n💡 Tip: Save this answer as a note with 'lemma ask ... --save' or 'lemma note save'"
+            )
+
     except Exception as e:
         output.print_error(f"Failed to generate answer: {e}")
         output.print_info("\nShowing relevant papers:")
@@ -397,6 +524,68 @@ def ask(question: str, db: str, top_k: int, index_path: str):
                 for p in context_papers
             ]
         )
+
+
+@cli.command(name="notes")
+@click.option("--db", default="~/.lemma/lemma.db", help="Database path")
+@click.option("--limit", type=int, default=20, help="Number of notes to show")
+def notes_list(db: str, limit: int):
+    """List all saved notes (shortcut for note list)."""
+    from ..core.notes import NoteManager
+    from rich.table import Table
+
+    repo = Repository(db)
+    note_manager = NoteManager()
+
+    # Fetch notes
+    try:
+        notes = repo.list_notes(limit=limit)
+    except Exception as e:
+        output.print_error(f"Failed to fetch notes: {e}")
+        return
+
+    if not notes:
+        output.print_info(
+            "No notes found. Save your first note with 'lemma ask ... --save'"
+        )
+        return
+
+    # Display notes table
+    table = Table(title=f"Saved Notes ({len(notes)} shown)", box=box.ROUNDED)
+    table.add_column("ID", justify="right", style="cyan", no_wrap=True)
+    table.add_column("Question", style="white", max_width=40)
+    table.add_column("Papers", justify="center", style="yellow", no_wrap=True)
+    table.add_column("Created", style="green", max_width=20)
+    table.add_column("Provider", style="magenta", no_wrap=True)
+
+    for note in notes:
+        # Convert note to dict for formatting
+        note_dict = {
+            "id": note.id,
+            "question": note.question,
+            "answer": note.answer,
+            "paper_ids": note.paper_ids,
+            "created_at": note.created_at,
+            "provider": note.provider,
+        }
+
+        preview = note_manager.format_note_preview(note_dict)
+
+        # Format created_at
+        created_str = (
+            note.created_at.strftime("%Y-%m-%d %H:%M") if note.created_at else "N/A"
+        )
+
+        table.add_row(
+            str(note.id),
+            preview["question_preview"],
+            str(preview["paper_count"]),
+            created_str,
+            preview["provider"] or "unknown",
+        )
+
+    output.console.print(table)
+    output.print_info("\nView full note: lemma show -n <id>")
 
 
 @cli.command()
@@ -860,6 +1049,335 @@ def verify(db: str, remove: bool):
         )
     else:
         output.print_info("\nRun with --remove to delete these entries")
+
+
+def _save_note_from_session(repo: Repository, session_data: dict) -> None:
+    """Helper function to save a note from session data.
+
+    Args:
+        repo: Database repository
+        session_data: Session data dictionary with question, answer, papers, etc.
+    """
+    from ..core.notes import NoteManager
+    from ..llm.providers import LLMRouter
+    from ..llm import prompts
+    from ..llm.cache import LLMCache
+
+    note_manager = NoteManager()
+
+    try:
+        # Extract session data
+        question = session_data["question"]
+        answer = session_data["answer"]
+        paper_ids = session_data["paper_ids"]
+        sources = session_data["sources"]
+        context_papers = session_data["context_papers"]
+        provider = session_data.get("provider", "unknown")
+        model = session_data.get("model", "unknown")
+        tokens_used = session_data.get("tokens_used", 0)
+
+        # Validate note data
+        try:
+            note_manager.validate_note_data(question, answer, paper_ids)
+        except ValueError as e:
+            output.print_error(f"Invalid note data: {e}")
+            return
+
+        # Format note with LLM
+        output.print_info("\n📝 Formatting and saving note...")
+
+        llm_router = LLMRouter(cache_enabled=True)
+        llm_cache = LLMCache(repo)
+
+        if not llm_router.is_available():
+            formatted_note = None
+        else:
+            try:
+                # Build formatting prompt
+                format_prompt = prompts.build_note_formatting_prompt(
+                    question, answer, context_papers
+                )
+
+                # Generate formatted note (quietly, no progress bar for auto-save)
+                format_response = llm_router.generate(
+                    prompt=format_prompt,
+                    max_tokens=800,
+                    cache_lookup=llm_cache.get,
+                    cache_store=llm_cache.store,
+                )
+
+                formatted_note = format_response.text if format_response else None
+
+            except Exception:
+                formatted_note = None
+
+        # Prepare note data
+        try:
+            note_data = note_manager.prepare_note_data(
+                question=question,
+                answer=answer,
+                paper_ids=paper_ids,
+                sources=sources,
+                formatted_note=formatted_note,
+                provider=provider,
+                model=model,
+                tokens_used=tokens_used,
+            )
+        except (ValueError, IOError) as e:
+            output.print_error(f"Failed to prepare note: {e}")
+            return
+
+        # Save to database
+        note = repo.add_note(**note_data)
+
+        if note:
+            output.print_success(f"✓ Note saved successfully (ID: {note.id})")
+            output.print_info(f"View with: lemma show -n {note.id}")
+        else:
+            output.print_error("Failed to save note to database")
+
+    except KeyError as e:
+        output.print_error(f"Invalid session data format: missing {e}")
+    except Exception as e:
+        output.print_error(f"Failed to save note: {e}")
+
+
+@cli.group()
+def note():
+    """Manage Q&A notes for literature review."""
+    pass
+
+
+@note.command(name="save")
+@click.option("--db", default="~/.lemma/lemma.db", help="Database path")
+def note_save(db: str):
+    """Save the last Q&A session as a formatted note.
+
+    This command saves the most recent answer from 'lemma ask' as a
+    literature review note with LLM formatting.
+    """
+    from ..core.notes import NoteManager
+    from ..llm.providers import LLMRouter
+    from ..llm import prompts
+    from ..llm.cache import LLMCache
+
+    repo = Repository(db)
+    note_manager = NoteManager()
+
+    # Retrieve last Q&A session
+    session_data = repo.get_config("last_qa_session")
+
+    if not session_data:
+        output.print_error(
+            "No recent Q&A session found. Please run 'lemma ask <question>' first."
+        )
+        return
+
+    try:
+        # Extract session data
+        question = session_data["question"]
+        answer = session_data["answer"]
+        paper_ids = session_data["paper_ids"]
+        sources = session_data["sources"]
+        context_papers = session_data["context_papers"]
+        provider = session_data.get("provider", "unknown")
+        model = session_data.get("model", "unknown")
+        tokens_used = session_data.get("tokens_used", 0)
+
+        # Validate note data
+        try:
+            note_manager.validate_note_data(question, answer, paper_ids)
+        except ValueError as e:
+            output.print_error(f"Invalid note data: {e}")
+            return
+
+        # Format note with LLM
+        output.print_info("Formatting note with LLM...")
+
+        llm_router = LLMRouter(cache_enabled=True)
+        llm_cache = LLMCache(repo)
+
+        if not llm_router.is_available():
+            output.print_warning(
+                "No LLM available for formatting. Saving raw note without formatting."
+            )
+            formatted_note = None
+        else:
+            try:
+                # Build formatting prompt
+                format_prompt = prompts.build_note_formatting_prompt(
+                    question, answer, context_papers
+                )
+
+                # Generate formatted note
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    transient=True,
+                ) as progress:
+                    task = progress.add_task("Generating formatted note...", total=None)
+                    format_response = llm_router.generate(
+                        prompt=format_prompt,
+                        max_tokens=800,
+                        cache_lookup=llm_cache.get,
+                        cache_store=llm_cache.store,
+                    )
+                    progress.update(task, completed=True)
+
+                formatted_note = format_response.text if format_response else None
+
+            except Exception as e:
+                output.print_warning(f"LLM formatting failed: {e}")
+                output.print_info("Saving raw note without formatting.")
+                formatted_note = None
+
+        # Prepare note data
+        try:
+            note_data = note_manager.prepare_note_data(
+                question=question,
+                answer=answer,
+                paper_ids=paper_ids,
+                sources=sources,
+                formatted_note=formatted_note,
+                provider=provider,
+                model=model,
+                tokens_used=tokens_used,
+            )
+        except (ValueError, IOError) as e:
+            output.print_error(f"Failed to prepare note: {e}")
+            return
+
+        # Save to database
+        note = repo.add_note(**note_data)
+
+        if note:
+            output.print_success(f"✓ Note saved successfully (ID: {note.id})")
+            output.print_info(f"View with: lemma note show {note.id}")
+        else:
+            output.print_error("Failed to save note to database")
+
+    except KeyError as e:
+        output.print_error(f"Invalid session data format: missing {e}")
+    except Exception as e:
+        output.print_error(f"Failed to save note: {e}")
+
+
+@note.command(name="list")
+@click.option("--db", default="~/.lemma/lemma.db", help="Database path")
+@click.option("--limit", type=int, default=20, help="Number of notes to show")
+def note_list(db: str, limit: int):
+    """List all saved notes."""
+    from ..core.notes import NoteManager
+    from rich.table import Table
+
+    repo = Repository(db)
+    note_manager = NoteManager()
+
+    # Fetch notes
+    try:
+        notes = repo.list_notes(limit=limit)
+    except Exception as e:
+        output.print_error(f"Failed to fetch notes: {e}")
+        return
+
+    if not notes:
+        output.print_info("No notes found. Save your first note with 'lemma note save'")
+        return
+
+    # Display notes table
+    table = Table(title=f"Saved Notes ({len(notes)} shown)", box=box.ROUNDED)
+    table.add_column("ID", justify="right", style="cyan", no_wrap=True)
+    table.add_column("Question", style="white", max_width=40)
+    table.add_column("Papers", justify="center", style="yellow", no_wrap=True)
+    table.add_column("Created", style="green", max_width=20)
+    table.add_column("Provider", style="magenta", no_wrap=True)
+
+    for note in notes:
+        # Convert note to dict for formatting
+        note_dict = {
+            "id": note.id,
+            "question": note.question,
+            "answer": note.answer,
+            "paper_ids": note.paper_ids,
+            "created_at": note.created_at,
+            "provider": note.provider,
+        }
+
+        preview = note_manager.format_note_preview(note_dict)
+
+        # Format created_at
+        created_str = (
+            note.created_at.strftime("%Y-%m-%d %H:%M") if note.created_at else "N/A"
+        )
+
+        table.add_row(
+            str(note.id),
+            preview["question_preview"],
+            str(preview["paper_count"]),
+            created_str,
+            preview["provider"] or "unknown",
+        )
+
+    output.console.print(table)
+    output.print_info("\nView full note: lemma note show <id>")
+
+
+@note.command(name="show")
+@click.argument("note_id", type=int)
+@click.option("--db", default="~/.lemma/lemma.db", help="Database path")
+def note_show(note_id: int, db: str):
+    """Show a specific note by ID.
+
+    NOTE_ID: The ID of the note to display
+    """
+    from ..core.notes import NoteManager
+
+    repo = Repository(db)
+    note_manager = NoteManager()
+
+    # Validate note ID
+    try:
+        note_manager.validate_note_id(note_id)
+    except ValueError as e:
+        output.print_error(str(e))
+        return
+
+    # Fetch note
+    try:
+        note = repo.get_note_by_id(note_id)
+    except Exception as e:
+        output.print_error(f"Failed to fetch note: {e}")
+        return
+
+    if not note:
+        output.print_error(f"Note with ID {note_id} not found")
+        output.print_info("Use 'lemma note list' to see available notes")
+        return
+
+    # Convert note to dict for formatting
+    note_dict = {
+        "id": note.id,
+        "question": note.question,
+        "answer": note.answer,
+        "formatted_note": note.formatted_note,
+        "sources": note.sources,
+        "provider": note.provider,
+        "model": note.model,
+        "tokens_used": note.tokens_used,
+        "created_at": note.created_at,
+    }
+
+    # Format and display
+    formatted_output = note_manager.format_note_display(note_dict)
+
+    output.console.print(
+        Panel(
+            formatted_output,
+            title=f"[bold cyan]Note #{note_id}[/bold cyan]",
+            border_style="cyan",
+            box=box.ROUNDED,
+        )
+    )
 
 
 def main():

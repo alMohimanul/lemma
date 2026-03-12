@@ -65,9 +65,15 @@ class PDFScanner:
             try:
                 scanned_file = self.scan_file(pdf_path)
                 scanned.append(scanned_file)
+            except (OSError, PermissionError, IOError) as e:
+                # Log access errors but continue scanning
+                logger.warning(f"Cannot access {pdf_path}: {e}")
+                continue
             except Exception as e:
-                # Log error but continue scanning
-                print(f"Error scanning {pdf_path}: {e}")
+                # Log unexpected errors
+                logger.error(
+                    f"Unexpected error scanning {pdf_path}: {e}", exc_info=True
+                )
                 continue
 
         return scanned

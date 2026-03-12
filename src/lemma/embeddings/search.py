@@ -69,12 +69,34 @@ class SemanticSearchIndex:
         if chunk_indices is None:
             chunk_indices = list(range(embeddings.shape[0]))
 
+        # Validate that we have the right number of chunk indices
+        if len(chunk_indices) != embeddings.shape[0]:
+            raise ValueError(
+                f"Chunk indices count mismatch: {len(chunk_indices)} indices "
+                f"but {embeddings.shape[0]} embeddings"
+            )
+
+        # Build ID mapping entries first (before modifying index)
+        new_entries = [(paper_id, chunk_idx) for chunk_idx in chunk_indices]
+
         # Add to FAISS index
         self.index.add(embeddings.astype(np.float32))
 
-        # Update ID mapping
-        for chunk_idx in chunk_indices:
-            self.id_map.append((paper_id, chunk_idx))
+        # Update ID mapping (after successful FAISS add)
+        self.id_map.extend(new_entries)
+
+        # Verify sync: index size must match id_map size
+        if self.index.ntotal != len(self.id_map):
+            # Critical desync detected - log error
+            logger.error(
+                f"CRITICAL: Index desync detected! "
+                f"FAISS index has {self.index.ntotal} vectors but "
+                f"ID map has {len(self.id_map)} entries. "
+                f"This will cause wrong papers to be returned in search results!"
+            )
+            raise RuntimeError(
+                f"Index desync: {self.index.ntotal} vectors != {len(self.id_map)} mappings"
+            )
 
     def search(
         self, query_embedding: np.ndarray, top_k: int = 5
@@ -195,6 +217,19 @@ class SemanticSearchIndex:
                 self.id_map = []
                 logger.warning(f"ID mapping not found at {pkl_path}, using empty list")
 
+            # Verify sync after loading
+            if self.index.ntotal != len(self.id_map):
+                logger.error(
+                    f"CRITICAL: Index desync detected after loading! "
+                    f"FAISS index has {self.index.ntotal} vectors but "
+                    f"ID map has {len(self.id_map)} entries. "
+                    f"Index file may be corrupted."
+                )
+                # Clear both to prevent wrong results
+                self.index = faiss.IndexFlatL2(self.embedding_dim)
+                self.id_map = []
+                return False
+
             logger.info(f"Loaded search index from {load_path} ({self.size()} vectors)")
             return True
         except (OSError, IOError, PermissionError) as e:
@@ -212,3 +247,27 @@ class SemanticSearchIndex:
         """Clear the index."""
         self.index = faiss.IndexFlatL2(self.embedding_dim)
         self.id_map = []
+
+    def verify_integrity(self) -> Tuple[bool, str]:
+        """Verify index and ID map are in sync.
+
+        Returns:
+            Tuple of (is_valid, message)
+        """
+        index_size = int(self.index.ntotal)
+        map_size = len(self.id_map)
+
+        if index_size != map_size:
+            return (
+                False,
+                f"Index desync: {index_size} vectors in FAISS but {map_size} in ID map",
+            )
+
+        # Check for duplicate entries that might cause issues
+        seen_positions = set()
+        for i, (paper_id, chunk_idx) in enumerate(self.id_map):
+            if i in seen_positions:
+                return (False, f"Duplicate mapping at position {i}")
+            seen_positions.add(i)
+
+        return (True, f"Index is valid: {index_size} vectors, all mappings consistent")

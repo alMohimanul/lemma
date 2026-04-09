@@ -19,6 +19,7 @@ from .models import (
     FileOperation,
     Config,
     Note,
+    PaperComparison,
 )
 from ..utils.logger import get_logger, log_exception
 
@@ -294,6 +295,31 @@ class Repository:
             return (
                 session.query(Embedding)
                 .filter(Embedding.paper_id == paper_id)
+                .order_by(Embedding.chunk_index)
+                .all()
+            )
+
+    def get_section_embeddings(
+        self, paper_id: int, section_name: str
+    ) -> List[Embedding]:
+        """Get embeddings for a specific section of a paper.
+
+        Args:
+            paper_id: Paper ID
+            section_name: Section name (supports fuzzy matching via LIKE)
+
+        Returns:
+            List of Embedding objects for the specified section
+        """
+        with self.get_session() as session:
+            # Use LIKE for fuzzy matching (e.g., "method" matches "Methods", "Methodology")
+            return (
+                session.query(Embedding)
+                .filter(
+                    Embedding.paper_id == paper_id,
+                    Embedding.section_name.like(f"%{section_name}%"),
+                    Embedding.is_valid.is_(True),
+                )
                 .order_by(Embedding.chunk_index)
                 .all()
             )
@@ -947,3 +973,171 @@ class Repository:
             Dictionary with sync stats or None
         """
         return self.get_config("last_sync_stats")
+
+    # Paper comparison cache operations
+    def add_paper_comparison(
+        self,
+        paper_ids: List[int],
+        comparison_hash: str,
+        comparison_result: Dict[str, Any],
+        summary: str,
+        section_name: Optional[str] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        tokens_used: int = 0,
+    ) -> Optional[PaperComparison]:
+        """Store a paper comparison result in the cache.
+
+        Args:
+            paper_ids: List of paper IDs being compared (will be sorted)
+            comparison_hash: Unique hash for this comparison
+            comparison_result: Full comparison data as dict
+            summary: Short summary of the comparison
+            section_name: Section being compared (None for whole-paper)
+            provider: LLM provider used
+            model: Model name
+            tokens_used: Total tokens consumed
+
+        Returns:
+            Created PaperComparison object, or None on error
+        """
+        with self.get_session() as session:
+            try:
+                # Sort paper IDs for consistency
+                sorted_ids = sorted(paper_ids)
+
+                comparison = PaperComparison(
+                    paper_ids=json.dumps(sorted_ids),
+                    comparison_hash=comparison_hash,
+                    section_name=section_name,
+                    comparison_result=json.dumps(comparison_result),
+                    summary=summary,
+                    provider=provider,
+                    model=model,
+                    tokens_used=tokens_used,
+                )
+                session.add(comparison)
+                session.commit()
+                session.refresh(comparison)
+                logger.info(
+                    f"Cached comparison for papers {sorted_ids}, section: {section_name or 'whole paper'}"
+                )
+                return comparison
+            except IntegrityError:
+                session.rollback()
+                logger.warning(
+                    f"Comparison already cached (hash: {comparison_hash[:16]}...)"
+                )
+                return None
+            except SQLAlchemyError as e:
+                session.rollback()
+                log_exception(logger, "Failed to cache comparison", e)
+                return None
+
+    def get_paper_comparison(self, comparison_hash: str) -> Optional[PaperComparison]:
+        """Retrieve a cached paper comparison by hash.
+
+        Args:
+            comparison_hash: Unique hash for the comparison
+
+        Returns:
+            PaperComparison object or None if not found
+        """
+        with self.get_session() as session:
+            return (
+                session.query(PaperComparison)
+                .filter(PaperComparison.comparison_hash == comparison_hash)
+                .first()
+            )
+
+    def get_comparisons_by_papers(
+        self, paper_ids: List[int], section_name: Optional[str] = None
+    ) -> List[PaperComparison]:
+        """Get all cached comparisons involving specific papers.
+
+        Args:
+            paper_ids: List of paper IDs
+            section_name: Optional filter by section
+
+        Returns:
+            List of PaperComparison objects
+        """
+        with self.get_session() as session:
+            sorted_ids = sorted(paper_ids)
+            query = session.query(PaperComparison).filter(
+                PaperComparison.paper_ids == json.dumps(sorted_ids)
+            )
+
+            if section_name:
+                query = query.filter(PaperComparison.section_name == section_name)
+
+            return query.order_by(desc(PaperComparison.created_at)).all()
+
+    def delete_comparisons_involving_paper(self, paper_id: int) -> int:
+        """Delete all cached comparisons involving a specific paper.
+
+        This is called when a paper is re-embedded to invalidate stale comparisons.
+
+        Args:
+            paper_id: Paper ID
+
+        Returns:
+            Number of comparisons deleted
+        """
+        with self.get_session() as session:
+            try:
+                # Find all comparisons that include this paper ID
+                comparisons = session.query(PaperComparison).all()
+                deleted_count = 0
+
+                for comp in comparisons:
+                    try:
+                        paper_ids = json.loads(comp.paper_ids)
+                        if paper_id in paper_ids:
+                            session.delete(comp)
+                            deleted_count += 1
+                    except json.JSONDecodeError:
+                        continue
+
+                session.commit()
+                if deleted_count > 0:
+                    logger.info(
+                        f"Invalidated {deleted_count} cached comparisons involving paper {paper_id}"
+                    )
+                return deleted_count
+            except SQLAlchemyError as e:
+                session.rollback()
+                log_exception(
+                    logger, f"Failed to delete comparisons for paper {paper_id}", e
+                )
+                return 0
+
+    def get_all_section_names_for_papers(
+        self, paper_ids: List[int]
+    ) -> Dict[int, List[str]]:
+        """Get all section names for given papers from their embeddings.
+
+        Args:
+            paper_ids: List of paper IDs
+
+        Returns:
+            Dict mapping paper_id to list of section names
+        """
+        with self.get_session() as session:
+            result = {}
+
+            for paper_id in paper_ids:
+                sections = (
+                    session.query(Embedding.section_name)
+                    .filter(
+                        Embedding.paper_id == paper_id,
+                        Embedding.section_name.isnot(None),
+                        Embedding.is_valid.is_(True),
+                    )
+                    .distinct()
+                    .all()
+                )
+
+                result[paper_id] = [s[0] for s in sections if s[0]]
+
+            return result

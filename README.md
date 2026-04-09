@@ -10,7 +10,8 @@
 - 🔒 **Privacy-First**: All papers stored locally, no cloud uploads
 - 🚀 **Fast Semantic Search**: Local vector search across all papers
 - 🤖 **AI Q&A (Optional)**: Ask questions using cloud LLMs
-- 📊 **Auto-Processing**: One command to scan, rename, and embed
+- 📊 **Paper Comparison**: Compare multiple papers side-by-side with intelligent caching
+- 📈 **Auto-Processing**: One command to scan, rename, and embed
 - 🔄 **Incremental Updates**: 70-90% faster re-embedding
 - 📂 **Smart Cleanup**: Automatically removes deleted papers from database
 - 👀 **Watch Mode**: Auto-process new papers as they're added
@@ -56,7 +57,12 @@ lemma sync --watch
 ### 4. Query Your Papers
 
 ```bash
+# Ask questions
 lemma ask "What are the main findings?"
+
+# Compare papers (NEW!)
+lemma ask "Compare papers 1 and 5"
+lemma ask "Compare the methodology in papers [2], [7], and [12]"
 ```
 
 ## 📖 Common Workflows
@@ -133,6 +139,7 @@ lemma ask "What are the main approaches discussed?"
 | `lemma sync --watch` | Monitor folder and auto-process new papers |
 | `lemma list` | List all indexed papers |
 | `lemma ask <question>` | Ask questions across papers (requires API key) |
+| `lemma ask "Compare papers X and Y"` | Compare multiple papers side-by-side |
 | `lemma search <query>` | Search papers by keyword |
 | `lemma show <id>` | Show paper details |
 | `lemma embed-status` | Check embedding coverage |

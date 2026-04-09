@@ -204,3 +204,31 @@ class Note(Base):
 
     def __repr__(self):
         return f"<Note(id={self.id}, question='{self.question[:50]}...', created_at={self.created_at})>"
+
+
+class PaperComparison(Base):
+    """Cached paper comparison results for reuse."""
+
+    __tablename__ = "paper_comparisons"
+
+    id = Column(Integer, primary_key=True)
+    paper_ids = Column(Text, nullable=False)  # JSON array of sorted paper IDs
+    comparison_hash = Column(
+        String(64), unique=True, nullable=False, index=True
+    )  # SHA256 hash of sorted paper IDs + section
+    section_name = Column(String(256))  # None for whole-paper comparison
+    comparison_result = Column(Text, nullable=False)  # JSON with full comparison data
+    summary = Column(Text)  # Short summary for quick lookup
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    provider = Column(String(32))  # LLM provider used
+    model = Column(String(64))  # Model name
+    tokens_used = Column(Integer)  # Total tokens used for this comparison
+
+    __table_args__ = (
+        Index("idx_comparison_hash", "comparison_hash"),
+        Index("idx_paper_ids", "paper_ids"),
+        Index("idx_created_at", "created_at"),
+    )
+
+    def __repr__(self):
+        return f"<PaperComparison(id={self.id}, papers={self.paper_ids}, section='{self.section_name}', created_at={self.created_at})>"

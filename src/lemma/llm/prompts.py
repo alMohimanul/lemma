@@ -228,3 +228,131 @@ Keep the note concise (200-300 words), focused on actionable insights for writin
 FORMATTED NOTE:"""
 
     return prompt
+
+
+def build_multi_paper_section_comparison_prompt(
+    section_name: str,
+    papers_content: List[Dict[str, Any]],
+    previous_sections_context: str = "",
+) -> str:
+    """Build a prompt for comparing a specific section across multiple papers.
+
+    Args:
+        section_name: Name of the section being compared
+        papers_content: List of dicts with paper metadata and section content
+        previous_sections_context: Context from previously compared sections
+
+    Returns:
+        Formatted prompt string
+    """
+    # Format each paper's content
+    papers_text = []
+    for i, paper in enumerate(papers_content, 1):
+        papers_text.append(
+            f"""Paper {i} - [{paper.get('paper_id')}] {paper.get('title', 'Untitled')}
+Authors: {paper.get('authors', 'Unknown')}
+Year: {paper.get('year', 'N/A')}
+
+{section_name} Content:
+{paper.get('content', '[No content available]')}
+"""
+        )
+
+    papers_section = "\n" + "=" * 80 + "\n".join(papers_text)
+
+    context_section = ""
+    if previous_sections_context:
+        context_section = f"""
+CONTEXT FROM PREVIOUS SECTIONS:
+{previous_sections_context}
+
+Use this context to build a coherent comparison across sections.
+"""
+
+    prompt = f"""You are a research assistant comparing academic papers. Compare the "{section_name}" section across {len(papers_content)} papers.
+{context_section}
+PAPERS TO COMPARE:
+{papers_section}
+
+Provide a structured comparison with:
+
+1. **Overview**: Brief summary of how each paper approaches this section
+
+2. **Key Similarities**: Common themes, methods, or findings across papers
+
+3. **Key Differences**: Distinct approaches, methodologies, or perspectives
+
+4. **Notable Insights**: Important points from each paper that stand out
+
+Keep the comparison concise (200-300 words), focused on actionable insights. Use paper IDs like [1], [2] to reference specific papers.
+
+COMPARISON:"""
+
+    return prompt
+
+
+def build_multi_paper_synthesis_prompt(
+    section_summaries: Dict[str, str], papers_metadata: List[Dict[str, Any]]
+) -> str:
+    """Build a prompt to synthesize section-by-section comparisons into final summary.
+
+    Args:
+        section_summaries: Dict mapping section names to their comparison summaries
+        papers_metadata: List of paper metadata dicts
+
+    Returns:
+        Formatted prompt string
+    """
+    # Format papers being compared
+    papers_list = []
+    for i, paper in enumerate(papers_metadata, 1):
+        papers_list.append(
+            f"[{paper.get('id')}] {paper.get('title', 'Untitled')} "
+            f"({paper.get('authors', 'Unknown')}, {paper.get('year', 'N/A')})"
+        )
+    papers_text = "\n".join(papers_list)
+
+    # Format section summaries
+    sections_text = []
+    for section, summary in section_summaries.items():
+        sections_text.append(
+            f"""### {section}
+{summary}
+"""
+        )
+
+    sections_section = "\n".join(sections_text)
+
+    prompt = f"""You are synthesizing a comprehensive comparison of {len(papers_metadata)} academic papers.
+
+PAPERS COMPARED:
+{papers_text}
+
+SECTION-BY-SECTION COMPARISONS:
+{sections_section}
+
+Based on these section comparisons, provide a comprehensive synthesis covering:
+
+## Overall Assessment
+Holistic view of how these papers relate to each other
+
+## Research Approaches
+How methodologies and approaches differ or complement each other
+
+## Key Contributions
+Most significant findings or contributions from each paper
+
+## Complementary Insights
+How these papers together advance understanding of the topic
+
+## Research Gaps & Future Directions
+Gaps identified when viewing these papers together
+
+## Practical Implications
+What researchers should take away from comparing these works
+
+Keep the synthesis comprehensive but concise (400-500 words). Use paper IDs [1], [2], etc. for citations.
+
+COMPREHENSIVE COMPARISON:"""
+
+    return prompt

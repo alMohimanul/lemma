@@ -5,6 +5,8 @@ on:
     branches: [ main, develop ]
   push:
     branches: [ develop ]
+    # Explicitly prevent direct pushes to main
+    # Use branch protection rules to enforce this
 
 jobs:
   test:

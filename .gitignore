@@ -43,8 +43,15 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Private documentation (local only, for Claude reference)
-IMPLEMENTATION_SUMMARY.md
+# Documentation files (keep only essential public docs)
+*.md
+!README.md
+!CONTRIBUTING.md
+!CHANGELOG.md
+
+# Optional: Uncomment if you create these files
+# !SECURITY.md
+# !CODE_OF_CONDUCT.md
 
 # Lemma runtime files
 *.log

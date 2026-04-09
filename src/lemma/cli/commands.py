@@ -312,9 +312,14 @@ def info(paper_id: int, db: str):
 @click.option("--index-path", default="~/.lemma/search.index", help="FAISS index path")
 @click.option("--save", "-s", is_flag=True, help="Automatically save answer as a note")
 def ask(question: str, db: str, top_k: int, index_path: str, save: bool):
-    """Ask a question across all papers (semantic search + LLM).
+    """Ask a question across all papers (semantic search + LLM) or compare papers.
 
     QUESTION: Your question about the papers
+
+    Examples:
+      lemma ask "What are the main findings on topic X?"
+      lemma ask "Compare papers 1 and 5"
+      lemma ask "Compare the methodology in papers [2], [7], and [12]"
 
     Note: Requires embeddings to be generated first. Run 'lemma embed' if needed.
 
@@ -325,10 +330,97 @@ def ask(question: str, db: str, top_k: int, index_path: str, save: bool):
     from ..llm.providers import LLMRouter
     from ..llm.cache import LLMCache
     from ..llm import prompts
+    from ..llm.question_parser import parse_comparison_request
+    from ..llm.comparison_cache import ComparisonCache
+    from ..llm.comparison import ComparisonEngine
     from pathlib import Path
 
     with Repository(db) as repo:
         extractor = MetadataExtractor()
+
+        # NEW: Detect if this is a comparison request
+        comparison_request = parse_comparison_request(question)
+
+        if comparison_request:
+            # This is a comparison request - handle it differently
+            output.print_info(
+                f"Detected comparison request for {len(comparison_request.paper_ids)} papers"
+            )
+
+            # Validate papers exist and have embeddings
+            papers = repo.get_papers_by_ids(comparison_request.paper_ids)
+
+            if len(papers) != len(comparison_request.paper_ids):
+                output.print_error(
+                    f"Some papers not found. Requested: {comparison_request.paper_ids}, "
+                    f"Found: {[p.id for p in papers]}"
+                )
+                return
+
+            # Check embeddings status
+            for paper in papers:
+                if paper.embedding_status != "completed":
+                    output.print_error(
+                        f"Paper {paper.id} ({paper.title or 'Untitled'}) doesn't have embeddings. "
+                        f"Run 'lemma embed' first."
+                    )
+                    return
+
+            # Initialize LLM router
+            llm_router = LLMRouter(cache_enabled=True)
+
+            if not llm_router.is_available():
+                output.print_error(
+                    "No LLM providers available. Please set up API keys:\n"
+                    "  GROQ_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY"
+                )
+                return
+
+            # Initialize comparison components
+            comp_cache = ComparisonCache(repo)
+            comp_engine = ComparisonEngine(repo, llm_router, comp_cache)
+
+            # Perform comparison
+            try:
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    transient=True,
+                ) as progress:
+                    if comparison_request.comparison_type == "section":
+                        task = progress.add_task(
+                            f"Comparing {comparison_request.section_name} section...",
+                            total=None,
+                        )
+                        result = comp_engine.compare_section(
+                            paper_ids=comparison_request.paper_ids,
+                            section_name=comparison_request.section_name,
+                        )
+                    else:
+                        task = progress.add_task(
+                            f"Comparing {len(papers)} papers...", total=None
+                        )
+                        result = comp_engine.compare_papers(
+                            paper_ids=comparison_request.paper_ids
+                        )
+
+                    progress.update(task, completed=True)
+
+                # Display results
+                output.print_comparison_results(result.to_dict(), papers)
+
+                # Note: Comparison saving functionality could be added here if needed
+
+                return
+
+            except Exception as e:
+                output.print_error(f"Comparison failed: {e}")
+                import traceback
+
+                output.print_error(f"Traceback: {traceback.format_exc()}")
+                return
+
+        # EXISTING: Regular Q&A flow (no changes to existing code below)
 
         # Check if FAISS index exists
         index_file = Path(index_path).expanduser()

@@ -20,6 +20,36 @@ def test_imports():
     assert SemanticSearchIndex is not None
 
 
+def test_extract_paper_id_from_question():
+    from lemma.llm.question_parser import extract_paper_ids
+
+    assert 9 in extract_paper_ids("explain the methodology of paper 9")
+    assert extract_paper_ids("compare [1] and [2]") == [1, 2]
+
+
+def test_wants_similar_papers():
+    from lemma.llm.question_parser import wants_similar_papers
+
+    assert wants_similar_papers("Find similar papers on transformers")
+    assert wants_similar_papers("What related work exists for GNNs?")
+    assert wants_similar_papers("Papers like paper 5 on RL")
+    assert not wants_similar_papers("What is the main contribution of paper 3?")
+
+
+def test_arxiv_client_helpers():
+    from lemma.integrations.arxiv_client import (
+        normalize_arxiv_id,
+        build_arxiv_search_query,
+        parse_arxiv_atom,
+    )
+
+    assert normalize_arxiv_id("2301.00001v2") == "2301.00001"
+    assert normalize_arxiv_id("arxiv:1234.5678") == "1234.5678"
+    q = build_arxiv_search_query("Graph neural networks for molecules")
+    assert q.startswith("all:")
+    assert parse_arxiv_atom("<not>xml</not>") == []
+
+
 def test_scanner_basic(temp_dir):
     """Test basic scanner functionality."""
     from lemma.core.scanner import PDFScanner

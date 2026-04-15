@@ -2,7 +2,7 @@
 import json
 import hashlib
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple, Set
 from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine, desc, or_
@@ -20,8 +20,10 @@ from .models import (
     Config,
     Note,
     PaperComparison,
+    ArxivQueryCache,
 )
 from ..utils.logger import get_logger, log_exception
+from ..integrations.arxiv_client import normalize_arxiv_id
 
 logger = get_logger(__name__)
 
@@ -1141,3 +1143,64 @@ class Repository:
                 result[paper_id] = [s[0] for s in sections if s[0]]
 
             return result
+
+    def get_local_arxiv_and_doi_sets(self) -> Tuple[Set[str], Set[str]]:
+        """Return normalized arXiv id set and lowercase DOI set for deduplication."""
+        with self.get_session() as session:
+            rows = session.query(Paper.arxiv_id, Paper.doi).all()
+
+        arxiv_ids: Set[str] = set()
+        dois: Set[str] = set()
+        for aid, doi in rows:
+            if aid and str(aid).strip():
+                arxiv_ids.add(normalize_arxiv_id(str(aid).strip()))
+            if doi and str(doi).strip():
+                dois.add(str(doi).strip().lower())
+        return arxiv_ids, dois
+
+    def get_arxiv_query_cache(self, query_hash: str) -> Optional[List[Dict[str, Any]]]:
+        """Return cached arXiv search result list if not expired."""
+        with self.get_session() as session:
+            row = (
+                session.query(ArxivQueryCache)
+                .filter(ArxivQueryCache.query_hash == query_hash)
+                .first()
+            )
+            if not row:
+                return None
+            if row.expires_at and row.expires_at < datetime.utcnow():
+                session.delete(row)
+                session.commit()
+                return None
+            try:
+                data = json.loads(row.results_json)
+                return data if isinstance(data, list) else None
+            except json.JSONDecodeError:
+                return None
+
+    def set_arxiv_query_cache(
+        self,
+        query_hash: str,
+        search_query: str,
+        max_results: int,
+        results: List[Dict[str, Any]],
+        ttl_hours: int = 24,
+    ) -> None:
+        """Store arXiv API results with TTL."""
+        with self.get_session() as session:
+            try:
+                session.query(ArxivQueryCache).filter(
+                    ArxivQueryCache.query_hash == query_hash
+                ).delete()
+                row = ArxivQueryCache(
+                    query_hash=query_hash,
+                    search_query=search_query,
+                    max_results=max_results,
+                    results_json=json.dumps(results, ensure_ascii=False),
+                    expires_at=datetime.utcnow() + timedelta(hours=ttl_hours),
+                )
+                session.add(row)
+                session.commit()
+            except SQLAlchemyError as e:
+                session.rollback()
+                log_exception(logger, "Failed to cache arXiv query", e)

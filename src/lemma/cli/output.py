@@ -189,6 +189,30 @@ def print_answer(
             console.print(f"  • {source}")
 
 
+def print_arxiv_related(entries: List[dict]) -> None:
+    """Print arXiv suggestions as a copy-friendly table (API-grounded links)."""
+    if not entries:
+        return
+
+    table = Table(
+        title="[bold]arXiv suggestions (API results)[/bold]",
+        box=box.ROUNDED,
+        show_lines=False,
+    )
+    table.add_column("ID", style="cyan", no_wrap=True, max_width=14)
+    table.add_column("Title", style="white", max_width=42)
+    table.add_column("Link", style="blue", max_width=36)
+
+    for e in entries:
+        aid = e.get("arxiv_id") or e.get("arxiv_id_norm") or "—"
+        title = (e.get("title") or "Untitled")[:80]
+        link = e.get("abs_url") or ""
+        table.add_row(str(aid), title, link)
+
+    console.print()
+    console.print(table)
+
+
 def print_comparison_results(result_dict: dict, papers: list) -> None:
     """Display paper comparison results in rich terminal format.
 

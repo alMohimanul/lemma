@@ -1,6 +1,7 @@
 """CLI commands for lemma paper manager."""
+import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -311,7 +312,29 @@ def info(paper_id: int, db: str):
 @click.option("--top-k", type=int, default=5, help="Number of papers to retrieve")
 @click.option("--index-path", default="~/.lemma/search.index", help="FAISS index path")
 @click.option("--save", "-s", is_flag=True, help="Automatically save answer as a note")
-def ask(question: str, db: str, top_k: int, index_path: str, save: bool):
+@click.option(
+    "--arxiv",
+    "arxiv_cli",
+    is_flag=True,
+    default=False,
+    help="Include related papers from the arXiv API (network; search query sent to arxiv.org).",
+)
+@click.option(
+    "--no-arxiv",
+    "no_arxiv_cli",
+    is_flag=True,
+    default=False,
+    help="Do not query arXiv even if LEMMA_ARXIV_RELATED=1 is set.",
+)
+def ask(
+    question: str,
+    db: str,
+    top_k: int,
+    index_path: str,
+    save: bool,
+    arxiv_cli: bool,
+    no_arxiv_cli: bool,
+):
     """Ask a question across all papers (semantic search + LLM) or compare papers.
 
     QUESTION: Your question about the papers
@@ -320,6 +343,8 @@ def ask(question: str, db: str, top_k: int, index_path: str, save: bool):
       lemma ask "What are the main findings on topic X?"
       lemma ask "Compare papers 1 and 5"
       lemma ask "Compare the methodology in papers [2], [7], and [12]"
+      lemma ask "Similar papers on graph neural networks"
+      lemma ask "Related work like paper 3" --arxiv
 
     Note: Requires embeddings to be generated first. Run 'lemma embed' if needed.
 
@@ -330,7 +355,13 @@ def ask(question: str, db: str, top_k: int, index_path: str, save: bool):
     from ..llm.providers import LLMRouter
     from ..llm.cache import LLMCache
     from ..llm import prompts
-    from ..llm.question_parser import parse_comparison_request
+    from ..llm.question_parser import (
+        parse_comparison_request,
+        wants_similar_papers,
+        extract_seed_paper_ids_for_similar,
+        extract_paper_ids,
+    )
+    from ..integrations import arxiv_client
     from ..llm.comparison_cache import ComparisonCache
     from ..llm.comparison import ComparisonEngine
     from pathlib import Path
@@ -420,6 +451,267 @@ def ask(question: str, db: str, top_k: int, index_path: str, save: bool):
                 output.print_error(f"Traceback: {traceback.format_exc()}")
                 return
 
+        use_arxiv = (
+            arxiv_cli or os.environ.get("LEMMA_ARXIV_RELATED", "").strip() == "1"
+        ) and not no_arxiv_cli
+
+        if wants_similar_papers(question):
+            index_file = Path(index_path).expanduser()
+            faiss_path = index_file.with_suffix(".faiss")
+            has_index = faiss_path.exists()
+
+            encoder = None
+            search_index = None
+            if has_index:
+                try:
+                    encoder = EmbeddingEncoder()
+                    search_index = SemanticSearchIndex(
+                        embedding_dim=encoder.embedding_dim, index_path=index_file
+                    )
+                    if search_index.size() == 0:
+                        search_index = None
+                except Exception as e:
+                    output.print_warning(f"Could not load search index: {e}")
+                    encoder = None
+                    search_index = None
+
+            if use_arxiv and encoder is None:
+                try:
+                    encoder = EmbeddingEncoder()
+                except Exception as e:
+                    output.print_error(f"Failed to load embedding model: {e}")
+                    return
+
+            if not has_index and not use_arxiv:
+                output.print_error(
+                    "Similar-papers questions need a FAISS index (run 'lemma embed') "
+                    "or enable arXiv with --arxiv or LEMMA_ARXIV_RELATED=1."
+                )
+                return
+
+            seed_ids = extract_seed_paper_ids_for_similar(question)
+            exclude: set = set()
+            seed_chunks: List[str] = []
+            for sid in seed_ids:
+                sp = repo.get_paper_by_id(sid)
+                if sp:
+                    exclude.add(sid)
+                    seed_chunks.append(
+                        ((sp.title or "") + "\n" + (sp.abstract or ""))[:4000]
+                    )
+            seed_blob = "\n\n".join(seed_chunks)
+
+            query_vector = None
+            local_top: List[Tuple[int, float]] = []
+            if encoder is not None and search_index is not None:
+                try:
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        transient=True,
+                    ) as progress:
+                        task = progress.add_task(
+                            "Encoding for similarity...", total=None
+                        )
+                        qtext = seed_blob.strip() if seed_blob.strip() else question
+                        query_vector = encoder.encode(qtext[:8000])
+                        progress.update(task, completed=True)
+                        task = progress.add_task("Searching library...", total=None)
+                        raw = search_index.get_top_papers(
+                            query_vector, top_k=max(top_k * 4, 20)
+                        )
+                        progress.update(task, completed=True)
+                    local_top = [
+                        (pid, dist) for pid, dist in raw if pid not in exclude
+                    ][:top_k]
+                except Exception as e:
+                    output.print_error(f"Similar-papers search failed: {e}")
+                    return
+            elif encoder is not None and use_arxiv:
+                qtext = seed_blob.strip() if seed_blob.strip() else question
+                query_vector = encoder.encode(qtext[:8000])
+
+            paper_ids = [pid for pid, _ in local_top]
+            papers = repo.get_papers_by_ids(paper_ids) if paper_ids else []
+            order = {pid: i for i, pid in enumerate(paper_ids)}
+            papers.sort(key=lambda p: order.get(p.id, 9999))
+
+            context_papers: List[Dict[str, Any]] = []
+            for paper in papers:
+                if paper.abstract and len(paper.abstract) > 100:
+                    paper_text = paper.abstract
+                else:
+                    try:
+                        paper_path = Path(paper.file_path)
+                        if paper_path.exists():
+                            full_text = extractor.extract_full_text(paper_path)
+                            paper_text = (
+                                full_text[:2000] if full_text else "No text available"
+                            )
+                        else:
+                            paper_text = "PDF file not found"
+                    except Exception:
+                        paper_text = "Error extracting text"
+                context_papers.append(
+                    {
+                        "id": paper.id,
+                        "title": paper.title or "Untitled",
+                        "authors": paper.authors or "Unknown",
+                        "year": paper.year or "N/A",
+                        "doi": paper.doi or "",
+                        "arxiv_id": paper.arxiv_id or "",
+                        "publication": paper.publication or "",
+                        "text": paper_text,
+                    }
+                )
+
+            arxiv_max = min(12, max(top_k, 8))
+            arxiv_entries: List[Dict[str, Any]] = []
+            if use_arxiv:
+                output.print_info(
+                    "Querying arXiv API (network): a search query derived from your "
+                    "question or seed paper is sent to export.arxiv.org."
+                )
+                seed_for_arxiv = seed_blob.strip() if seed_blob.strip() else question
+                sq = arxiv_client.build_arxiv_search_query(seed_for_arxiv)
+                qh = arxiv_client.arxiv_cache_key(sq, arxiv_max)
+                cached = repo.get_arxiv_query_cache(qh)
+                if cached is not None:
+                    arxiv_entries = list(cached)
+                else:
+                    try:
+                        with Progress(
+                            SpinnerColumn(),
+                            TextColumn("[progress.description]{task.description}"),
+                            transient=True,
+                        ) as progress:
+                            task = progress.add_task("Fetching arXiv...", total=None)
+                            arxiv_entries = arxiv_client.fetch_arxiv_search(
+                                sq, max_results=arxiv_max
+                            )
+                            progress.update(task, completed=True)
+                    except Exception as e:
+                        output.print_warning(f"arXiv request failed: {e}")
+                        arxiv_entries = []
+                    if arxiv_entries:
+                        repo.set_arxiv_query_cache(qh, sq, arxiv_max, arxiv_entries)
+
+                la, ld = repo.get_local_arxiv_and_doi_sets()
+                arxiv_entries = arxiv_client.dedupe_against_library(
+                    arxiv_entries, la, ld
+                )
+                if query_vector is not None and encoder is not None and arxiv_entries:
+                    arxiv_entries = arxiv_client.rerank_by_embedding_similarity(
+                        arxiv_entries, query_vector, encoder
+                    )
+                arxiv_entries = arxiv_entries[:arxiv_max]
+
+            local_lines: List[str] = []
+            for p in context_papers:
+                local_lines.append(
+                    f"- Lemma id {p['id']}: {p['title']} ({p['year']}) | "
+                    f"authors: {p['authors']} | doi: {p.get('doi') or 'N/A'} | "
+                    f"arxiv: {p.get('arxiv_id') or 'N/A'}"
+                )
+            local_block = (
+                "\n".join(local_lines)
+                if local_lines
+                else "(No local library matches from the semantic index for this query.)"
+            )
+
+            arxiv_lines: List[str] = []
+            for e in arxiv_entries:
+                arxiv_lines.append(
+                    f"- arxiv_id={e.get('arxiv_id', '')} | abs_url={e.get('abs_url', '')} | "
+                    f"title={e.get('title', '')} | category={e.get('primary_category', '')} | "
+                    f"published={e.get('published', '')} | authors={e.get('authors', '')} | "
+                    f"summary={e.get('summary', '')[:400]}"
+                )
+            arxiv_block = "\n".join(arxiv_lines) if arxiv_lines else ""
+
+            llm_router = LLMRouter(cache_enabled=True)
+            llm_cache = LLMCache(repo)
+
+            if not llm_router.is_available():
+                output.print_warning(
+                    "No LLM configured; listing similarity candidates only."
+                )
+                if context_papers:
+                    output.print_paper_table(
+                        [
+                            {
+                                "id": p["id"],
+                                "title": p["title"],
+                                "authors": p["authors"],
+                                "year": p["year"],
+                                "embedding_status": "completed",
+                            }
+                            for p in context_papers
+                        ]
+                    )
+                if arxiv_entries:
+                    output.print_arxiv_related(arxiv_entries)
+                return
+
+            try:
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    transient=True,
+                ) as progress:
+                    task = progress.add_task("Generating answer...", total=None)
+                    prompt = prompts.build_similar_papers_prompt(
+                        question, local_block, arxiv_block
+                    )
+                    response = llm_router.generate(
+                        prompt=prompt,
+                        cache_lookup=llm_cache.get,
+                        cache_store=llm_cache.store,
+                    )
+                    progress.update(task, completed=True)
+
+                if not response:
+                    output.print_error("Failed to generate answer from LLM")
+                    return
+
+                sources = [
+                    f"[{p['id']}] {p['title']} ({p['year']})" for p in context_papers
+                ]
+                output.print_answer(question, response.text, sources)
+                if arxiv_entries:
+                    output.print_arxiv_related(arxiv_entries)
+
+                if response.provider != "cache":
+                    output.print_info(
+                        f"\nProvider: {response.provider} | Model: {response.model} | "
+                        f"Tokens: {response.tokens_used}"
+                    )
+                else:
+                    output.print_info("\n[Cached response]")
+
+                session_data = {
+                    "question": question,
+                    "answer": response.text,
+                    "paper_ids": [p["id"] for p in context_papers],
+                    "sources": sources,
+                    "context_papers": context_papers,
+                    "provider": response.provider,
+                    "model": response.model,
+                    "tokens_used": response.tokens_used,
+                    "arxiv_related": arxiv_entries,
+                }
+                repo.set_config("last_qa_session", session_data)
+
+                if save:
+                    _save_note_from_session(repo, session_data)
+                else:
+                    output.print_info(
+                        "\n💡 Tip: Save this answer as a note with 'lemma ask ... --save' or 'lemma note save'"
+                    )
+            except Exception as e:
+                output.print_error(f"Failed to generate answer: {e}")
+            return
+
         # EXISTING: Regular Q&A flow (no changes to existing code below)
 
         # Check if FAISS index exists
@@ -458,23 +750,51 @@ def ask(question: str, db: str, top_k: int, index_path: str, save: bool):
             output.print_error(f"Failed to encode question: {e}")
             return
 
-        # Search for relevant papers
+        # Search for relevant papers (and always include IDs named in the question)
         try:
+            explicit_ids = extract_paper_ids(question)
+            valid_explicit: List[int] = []
+            for pid in explicit_ids:
+                p = repo.get_paper_by_id(pid)
+                if p:
+                    valid_explicit.append(pid)
+                else:
+                    output.print_warning(f"Paper id {pid} not found in library.")
+
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 transient=True,
             ) as progress:
                 task = progress.add_task("Searching papers...", total=None)
-                top_papers = search_index.get_top_papers(query_vector, top_k=top_k)
+                top_papers = search_index.get_top_papers(
+                    query_vector, top_k=max(top_k * 3, top_k + len(valid_explicit) * 2)
+                )
                 progress.update(task, completed=True)
 
-            if not top_papers:
+            if not top_papers and not valid_explicit:
                 output.print_warning("No relevant papers found for your question.")
                 return
 
-            paper_ids = [paper_id for paper_id, _ in top_papers]
-            output.print_info(f"Found {len(paper_ids)} relevant papers")
+            seen = set()
+            paper_ids: List[int] = []
+            for pid in valid_explicit:
+                if pid not in seen:
+                    seen.add(pid)
+                    paper_ids.append(pid)
+            target = min(max(top_k, len(paper_ids)), 25)
+            for pid, _ in top_papers:
+                if len(paper_ids) >= target:
+                    break
+                if pid not in seen:
+                    seen.add(pid)
+                    paper_ids.append(pid)
+
+            if valid_explicit:
+                output.print_info(
+                    f"Including lemma id(s) from your question: {valid_explicit}"
+                )
+            output.print_info(f"Using {len(paper_ids)} paper(s) for context")
 
         except Exception as e:
             output.print_error(f"Search failed: {e}")
@@ -496,7 +816,7 @@ def ask(question: str, db: str, top_k: int, index_path: str, save: bool):
                         if paper_path.exists():
                             full_text = extractor.extract_full_text(paper_path)
                             paper_text = (
-                                full_text[:2000] if full_text else "No text available"
+                                full_text[:4000] if full_text else "No text available"
                             )
                         else:
                             paper_text = "PDF file not found"
@@ -516,6 +836,32 @@ def ask(question: str, db: str, top_k: int, index_path: str, save: bool):
         except Exception as e:
             output.print_error(f"Failed to retrieve papers: {e}")
             return
+
+        # If the question targets methodology/sections, prefer more body text than abstract alone
+        _qlow = question.lower()
+        if any(
+            w in _qlow
+            for w in (
+                "method",
+                "methodology",
+                "approach",
+                "experiment",
+                "architecture",
+                "model",
+            )
+        ):
+            for cp in context_papers:
+                try:
+                    p = repo.get_paper_by_id(cp["id"])
+                    if not p:
+                        continue
+                    paper_path = Path(p.file_path)
+                    if paper_path.exists():
+                        full_text = extractor.extract_full_text(paper_path)
+                        if full_text and len(full_text) > len(cp.get("text") or ""):
+                            cp["text"] = full_text[:6000]
+                except Exception:
+                    pass
 
         # Initialize LLM router and cache
         llm_router = LLMRouter(cache_enabled=True)

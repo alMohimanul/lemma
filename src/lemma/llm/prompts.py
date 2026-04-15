@@ -18,21 +18,22 @@ def build_qa_prompt(question: str, context_papers: List[Dict[str, Any]]) -> str:
         title = paper.get("title", "Untitled")
         authors = paper.get("authors", "Unknown")
         year = paper.get("year", "N/A")
+        lemma_id = paper.get("id", "")
         text = paper.get("text", "")
 
         context_parts.append(
-            f"[Paper {i}]\n"
+            f"[Paper {i} | Lemma id: {lemma_id}]\n"
             f"Title: {title}\n"
             f"Authors: {authors}\n"
             f"Year: {year}\n"
-            f"Content: {text[:2000]}\n"  # Limit to avoid token overflow
+            f"Content: {text[:6000]}\n"  # Limit to avoid token overflow
         )
 
     context = "\n\n".join(context_parts)
 
     prompt = f"""You are a research assistant helping to answer questions about academic papers.
 
-Based on the following papers, answer the question below. Cite specific papers when relevant.
+Based on the following papers, answer the question below. When the user names a lemma id (e.g. "paper 9"), use the block with that Lemma id. Cite specific papers when relevant.
 
 Papers:
 {context}
@@ -42,6 +43,43 @@ Question: {question}
 Provide a clear, concise answer based on the information in the papers above. If the papers don't contain enough information to answer the question, say so."""
 
     return prompt
+
+
+def build_similar_papers_prompt(
+    question: str,
+    local_candidates_text: str,
+    arxiv_candidates_text: str,
+) -> str:
+    """Prompt for similar/related paper discovery (local + optional arXiv)."""
+    arxiv_section = ""
+    if arxiv_candidates_text.strip():
+        arxiv_section = f"""
+ARXIV_CANDIDATES (from arXiv.org API only — these rows are authoritative):
+{arxiv_candidates_text}
+
+When mentioning arXiv items, use only the arxiv_id and abs_url from this block. Do not invent arXiv IDs or URLs.
+"""
+    else:
+        arxiv_section = """
+No arXiv candidates were fetched for this request (local library only or arXiv disabled).
+"""
+
+    return f"""You are helping a researcher find related academic work.
+
+The user asked:
+{question}
+
+LOCAL_LIBRARY_CANDIDATES (papers already in the user's Lemma library; Lemma paper id is authoritative):
+{local_candidates_text}
+{arxiv_section}
+
+Instructions:
+1. Summarize which local papers are most related to the question and why (use Lemma paper ids from the block).
+2. If ARXIV_CANDIDATES is non-empty, briefly describe how each suggested arXiv preprint relates; treat arXiv results as keyword-based suggestions, not guaranteed semantic neighbors.
+3. Never fabricate arXiv identifiers, DOIs, or URLs — only use those explicitly listed in ARXIV_CANDIDATES.
+4. Clearly separate "In your library" from "On arXiv (not in library)" in your answer.
+
+Answer:"""
 
 
 def build_summary_prompt(paper: Dict[str, Any], max_length: int = 200) -> str:

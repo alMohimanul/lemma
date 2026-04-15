@@ -58,6 +58,40 @@ SECTION_PATTERNS = {
     ],
 }
 
+# Similar-papers discovery (local semantic neighbors + optional arXiv)
+SIMILAR_PAPERS_PATTERNS = [
+    r"\bsimilar\s+papers?\b",
+    r"\brelated\s+work\b",
+    r"\brelated\s+papers?\b",
+    r"\bpapers?\s+similar\b",
+    r"\bpapers?\s+like\b",
+    r"\bmore\s+papers?\s+(?:on|about|like)\b",
+    r"\bfind\s+similar\b",
+    r"\bsuggestions?\s+for\s+related\b",
+    r"\bwhat\s+else\s+(?:to\s+)?read\b",
+    r"\barxiv\s+(?:for\s+)?(?:similar|related)\b",
+    r"\bother\s+papers?\s+(?:on|about)\b",
+]
+
+
+def wants_similar_papers(question: str) -> bool:
+    """True when the user wants suggestions for related / similar papers.
+
+    Used by ``lemma ask`` (without a separate command). Example phrases:
+    "similar papers on X", "related work for transformers", "papers like paper 5",
+    "what else should I read on this topic".
+    """
+    q = question.lower()
+    return any(re.search(p, q) for p in SIMILAR_PAPERS_PATTERNS)
+
+
+def extract_seed_paper_ids_for_similar(question: str) -> List[int]:
+    """Paper IDs named as seeds for similarity search (e.g. 'like paper 7').
+
+    Returns all extracted IDs; the caller excludes them from neighbor results.
+    """
+    return extract_paper_ids(question)
+
 
 def detect_comparison_intent(question: str) -> Tuple[bool, Dict[str, Any]]:
     """Detect if the question is requesting a paper comparison.

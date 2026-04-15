@@ -232,3 +232,17 @@ class PaperComparison(Base):
 
     def __repr__(self):
         return f"<PaperComparison(id={self.id}, papers={self.paper_ids}, section='{self.section_name}', created_at={self.created_at})>"
+
+
+class ArxivQueryCache(Base):
+    """TTL cache for arXiv API search responses (similar-papers feature)."""
+
+    __tablename__ = "arxiv_query_cache"
+
+    id = Column(Integer, primary_key=True)
+    query_hash = Column(String(64), unique=True, nullable=False, index=True)
+    search_query = Column(Text, nullable=False)
+    max_results = Column(Integer, nullable=False)
+    results_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)

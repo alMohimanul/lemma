@@ -11,6 +11,7 @@
 - 🚀 **Fast Semantic Search**: Local vector search across all papers
 - 🤖 **AI Q&A (Optional)**: Ask questions using cloud LLMs
 - 📊 **Paper Comparison**: Compare multiple papers side-by-side with intelligent caching
+- 🔗 **Similar papers**: Ask for related work in your library; optional arXiv suggestions (`--arxiv` or `LEMMA_ARXIV_RELATED=1`)
 - 📈 **Auto-Processing**: One command to scan, rename, and embed
 - 🔄 **Incremental Updates**: 70-90% faster re-embedding
 - 📂 **Smart Cleanup**: Automatically removes deleted papers from database
@@ -140,6 +141,7 @@ lemma ask "What are the main approaches discussed?"
 | `lemma list` | List all indexed papers |
 | `lemma ask <question>` | Ask questions across papers (requires API key) |
 | `lemma ask "Compare papers X and Y"` | Compare multiple papers side-by-side |
+| `lemma ask "Similar papers on …"` | Related papers in your library; add `--arxiv` for arXiv API suggestions |
 | `lemma search <query>` | Search papers by keyword |
 | `lemma show <id>` | Show paper details |
 | `lemma embed-status` | Check embedding coverage |
@@ -149,13 +151,14 @@ lemma ask "What are the main approaches discussed?"
 - **All papers stay on your machine** - never uploaded anywhere
 - **Embeddings generated locally** - no external API calls
 - **Cloud APIs only for Q&A** - and only if you configure them
+- **Similar papers + arXiv (optional)** - If you run `lemma ask "…similar…" --arxiv` or set `LEMMA_ARXIV_RELATED=1`, Lemma sends a **keyword search query** (derived from your question or seed paper title/abstract) to **export.arxiv.org**. No PDFs are uploaded. Responses are cached locally in `lemma.db` for 24 hours to reduce repeat traffic.
 - **Database stored locally** at `~/.lemma/lemma.db`
 
 ## 📦 Requirements
 
 - Python 3.10 or higher
 - ~500MB disk space for embedding models
-- Internet connection only for optional AI Q&A
+- Internet connection only for optional AI Q&A and optional arXiv similar-paper search
 
 ## License
 

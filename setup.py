@@ -5,8 +5,8 @@ with open("README.md", "r", encoding="utf-8") as f:
     long_description = f.read()
 
 setup(
-    name="MAVYN",
-    version="2.0.0",
+    name="mavyn",
+    version="2.1.0",
     author="Mahir",
     author_email="aislam192054@gmail.com",
     description="Local-first paper manager with semantic search and LLM reasoning",

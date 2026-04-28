@@ -353,6 +353,7 @@ def ask(
     from ..embeddings.encoder import EmbeddingEncoder
     from ..embeddings.search import SemanticSearchIndex
     from ..llm.providers import LLMRouter
+    from ..llm.rate_limits import RateLimitStore
     from ..llm.cache import LLMCache
     from ..llm import prompts
     from ..llm.question_parser import (
@@ -398,7 +399,7 @@ def ask(
                     return
 
             # Initialize LLM router
-            llm_router = LLMRouter(cache_enabled=True)
+            llm_router = LLMRouter(rate_store=RateLimitStore(), cache_enabled=True)
 
             if not llm_router.is_available():
                 output.print_error(
@@ -630,7 +631,7 @@ def ask(
                 )
             arxiv_block = "\n".join(arxiv_lines) if arxiv_lines else ""
 
-            llm_router = LLMRouter(cache_enabled=True)
+            llm_router = LLMRouter(rate_store=RateLimitStore(), cache_enabled=True)
             llm_cache = LLMCache(repo)
 
             if not llm_router.is_available():
@@ -655,21 +656,15 @@ def ask(
                 return
 
             try:
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    transient=True,
-                ) as progress:
-                    task = progress.add_task("Generating answer...", total=None)
-                    prompt = prompts.build_similar_papers_prompt(
-                        question, local_block, arxiv_block
-                    )
+                prompt = prompts.build_similar_papers_prompt(
+                    question, local_block, arxiv_block
+                )
+                with output.thinking_spinner():
                     response = llm_router.generate(
                         prompt=prompt,
                         cache_lookup=llm_cache.get,
                         cache_store=llm_cache.store,
                     )
-                    progress.update(task, completed=True)
 
                 if not response:
                     output.print_error("Failed to generate answer from LLM")
@@ -888,7 +883,7 @@ def ask(
         ]
 
         # Initialize LLM router and cache
-        llm_router = LLMRouter(cache_enabled=True)
+        llm_router = LLMRouter(rate_store=RateLimitStore(), cache_enabled=True)
         llm_cache = LLMCache(repo)
 
         # Check if LLM is available
@@ -915,42 +910,33 @@ def ask(
 
         # Build prompt and generate answer
         try:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                transient=True,
-            ) as progress:
-                task = progress.add_task("Generating answer...", total=None)
-
-                # Build prompt
-                _title = context_papers[0]["title"] if context_papers else "the paper"
-                if (
-                    task_type == "summarize_section"
-                    and task_section
-                    and len(included_ids) == 1
-                ):
-                    _raw_section = task_section.replace(":missing", "")
-                    if task_section.endswith(":missing"):
-                        prompt = prompts.build_section_missing_prompt(
-                            context_str, _title, _raw_section
-                        )
-                    else:
-                        prompt = prompts.build_section_summary_prompt(
-                            context_str, _title, _raw_section
-                        )
-                elif task_type == "summarize" and len(included_ids) == 1:
-                    prompt = prompts.build_summary_prompt(context_str, _title)
+            # Build prompt
+            _title = context_papers[0]["title"] if context_papers else "the paper"
+            if (
+                task_type == "summarize_section"
+                and task_section
+                and len(included_ids) == 1
+            ):
+                _raw_section = task_section.replace(":missing", "")
+                if task_section.endswith(":missing"):
+                    prompt = prompts.build_section_missing_prompt(
+                        context_str, _title, _raw_section
+                    )
                 else:
-                    prompt = prompts.build_qa_prompt(question, context_str)
+                    prompt = prompts.build_section_summary_prompt(
+                        context_str, _title, _raw_section
+                    )
+            elif task_type == "summarize" and len(included_ids) == 1:
+                prompt = prompts.build_summary_prompt(context_str, _title)
+            else:
+                prompt = prompts.build_qa_prompt(question, context_str)
 
-                # Generate response with cache
+            with output.thinking_spinner():
                 response = llm_router.generate(
                     prompt=prompt,
                     cache_lookup=llm_cache.get,
                     cache_store=llm_cache.store,
                 )
-
-                progress.update(task, completed=True)
 
             if not response:
                 output.print_error("Failed to generate answer from LLM")
@@ -2128,6 +2114,7 @@ def _save_note_from_session(repo: Repository, session_data: dict) -> None:
     """
     from ..core.notes import NoteManager
     from ..llm.providers import LLMRouter
+    from ..llm.rate_limits import RateLimitStore
     from ..llm import prompts
     from ..llm.cache import LLMCache
 
@@ -2154,7 +2141,7 @@ def _save_note_from_session(repo: Repository, session_data: dict) -> None:
         # Format note with LLM
         output.print_info("\n📝 Formatting and saving note...")
 
-        llm_router = LLMRouter(cache_enabled=True)
+        llm_router = LLMRouter(rate_store=RateLimitStore(), cache_enabled=True)
         llm_cache = LLMCache(repo)
 
         if not llm_router.is_available():
@@ -2226,6 +2213,7 @@ def note_save(db: str):
     """
     from ..core.notes import NoteManager
     from ..llm.providers import LLMRouter
+    from ..llm.rate_limits import RateLimitStore
     from ..llm import prompts
     from ..llm.cache import LLMCache
 
@@ -2262,7 +2250,7 @@ def note_save(db: str):
             # Format note with LLM
             output.print_info("Formatting note with LLM...")
 
-            llm_router = LLMRouter(cache_enabled=True)
+            llm_router = LLMRouter(rate_store=RateLimitStore(), cache_enabled=True)
             llm_cache = LLMCache(repo)
 
             if not llm_router.is_available():
@@ -2278,21 +2266,13 @@ def note_save(db: str):
                     )
 
                     # Generate formatted note
-                    with Progress(
-                        SpinnerColumn(),
-                        TextColumn("[progress.description]{task.description}"),
-                        transient=True,
-                    ) as progress:
-                        task = progress.add_task(
-                            "Generating formatted note...", total=None
-                        )
+                    with output.thinking_spinner():
                         format_response = llm_router.generate(
                             prompt=format_prompt,
                             max_tokens=800,
                             cache_lookup=llm_cache.get,
                             cache_store=llm_cache.store,
                         )
-                        progress.update(task, completed=True)
 
                     formatted_note = format_response.text if format_response else None
 

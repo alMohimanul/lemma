@@ -122,7 +122,9 @@ class ComparisonEngine:
 
         # Generate comparison with LLM
         try:
-            response = self.llm_router.generate(prompt=prompt, max_tokens=2000)
+            response = self.llm_router.generate(
+                prompt=prompt, max_tokens=2000, tier="heavy"
+            )
 
             if not response:
                 raise Exception("LLM returned empty response")
@@ -249,7 +251,9 @@ class ComparisonEngine:
             )
 
             try:
-                response = self.llm_router.generate(prompt=prompt, max_tokens=1500)
+                response = self.llm_router.generate(
+                    prompt=prompt, max_tokens=1500, tier="heavy"
+                )
 
                 if response:
                     section_summaries[section] = response.text
@@ -269,7 +273,7 @@ class ComparisonEngine:
 
         try:
             final_response = self.llm_router.generate(
-                prompt=final_prompt, max_tokens=2500
+                prompt=final_prompt, max_tokens=2500, tier="heavy"
             )
 
             if not final_response:

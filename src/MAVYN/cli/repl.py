@@ -86,6 +86,7 @@ No special command needed! Just type naturally:
 
 ## Other Commands
 - `/help` - Show this help message
+- `/model` - Show LLM model status and rate limit cooldowns
 - `/exit` or Ctrl+D - Exit MAVYN
 
 ## Tips
@@ -136,6 +137,10 @@ No special command needed! Just type naturally:
             self.handle_list()
             return True
 
+        elif cmd == "model":
+            self.handle_model()
+            return True
+
         else:
             console.print(f"[red]Unknown command: /{cmd}[/red]")
             console.print("[yellow]Type /help to see available commands[/yellow]")
@@ -179,6 +184,39 @@ No special command needed! Just type naturally:
             )
         except Exception as e:
             console.print(f"[red]Failed to list papers: {e}[/red]")
+
+    def handle_model(self):
+        """Handle /model command — show Groq model status and rate limit cooldowns."""
+        from rich.table import Table
+        from rich import box as rbox
+        from ..llm.rate_limits import RateLimitStore
+        from ..llm.providers import LLMRouter
+
+        store = RateLimitStore()
+        all_models = LLMRouter.HEAVY_MODELS
+
+        table = Table(box=rbox.ROUNDED, show_header=True, header_style="bold cyan")
+        table.add_column("Model", style="white")
+        table.add_column("Tier", style="dim")
+        table.add_column("Status", justify="center")
+        table.add_column("Cooldown", justify="left")
+
+        for model in all_models:
+            tier = "heavy + light" if model == "openai/gpt-oss-120b" else "light"
+            display = model if len(model) <= 38 else model[:35] + "..."
+            cooldown = store.cooldown_display(model)
+            if cooldown == "Available":
+                status = "[green]✓ Available[/green]"
+                cd_text = "[dim]—[/dim]"
+            elif cooldown.startswith("RPM"):
+                status = "[yellow]⏳ RPM[/yellow]"
+                cd_text = f"[yellow]{cooldown}[/yellow]"
+            else:
+                status = "[red]✗ Daily[/red]"
+                cd_text = f"[red]{cooldown}[/red]"
+            table.add_row(display, tier, status, cd_text)
+
+        console.print(table)
 
     def handle_natural_language(self, query: str):
         """Handle natural language query.

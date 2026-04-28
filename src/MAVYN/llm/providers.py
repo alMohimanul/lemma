@@ -221,7 +221,7 @@ class OllamaProvider(LLMProvider):
 class LLMRouter:
     """Routes Groq requests across models by tier, with rate-limit fallback."""
 
-    # Heavy tier: comparison queries get gpt-oss first
+    # Heavy tier: comparison + literature review queries get gpt-oss first
     HEAVY_MODELS: List[str] = [
         "openai/gpt-oss-120b",
         "compound-beta",

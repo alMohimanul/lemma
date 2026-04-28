@@ -6,7 +6,6 @@ from typing import List, Optional
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import box
 
 # Status verbs shown during search and generation steps
@@ -46,20 +45,20 @@ def random_status(category: str = "think") -> str:
     return random.choice(pool) + "..."
 
 
+console = Console()
+
+
 @contextmanager
 def thinking_spinner():
-    """Context manager that shows a cycling random-verb spinner during LLM generation."""
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        transient=True,
-    ) as progress:
-        task = progress.add_task(random_status("think"), total=None)
-        stop = threading.Event()
+    """Single in-place animated spinner with cycling random verbs."""
+    stop = threading.Event()
+    with console.status(
+        f"[bold cyan]{random_status('think')}[/bold cyan]", spinner="dots"
+    ) as status:
 
         def _cycle():
             while not stop.wait(1.5):
-                progress.update(task, description=random_status("think"))
+                status.update(f"[bold cyan]{random_status('think')}[/bold cyan]")
 
         t = threading.Thread(target=_cycle, daemon=True)
         t.start()
@@ -67,10 +66,6 @@ def thinking_spinner():
             yield
         finally:
             stop.set()
-            progress.update(task, completed=True)
-
-
-console = Console()
 
 
 def print_success(message: str) -> None:

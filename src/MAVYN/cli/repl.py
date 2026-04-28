@@ -1,4 +1,5 @@
 """Interactive REPL for MAVYN - Natural Language Research Assistant."""
+import re
 from pathlib import Path
 from typing import List, Any, Optional
 from rich.console import Console
@@ -7,6 +8,12 @@ from rich import box
 from rich.markdown import Markdown
 
 _HISTORY_FILE = Path.home() / ".MAVYN" / ".history"
+
+_LIT_REVIEW_RE = re.compile(
+    r"\b(literature\s+review|lit\s+review|write\s+a\s+review|"
+    r"review\s+(the\s+)?literature|systematic\s+review)\b",
+    re.IGNORECASE,
+)
 
 
 def _setup_readline() -> bool:
@@ -225,16 +232,17 @@ No special command needed! Just type naturally:
             query: The user's natural language question
         """
         from .commands import ask_command
-        import re
+
+        # Route literature review requests to dedicated handler
+        if _LIT_REVIEW_RE.search(query):
+            self.handle_litreview(query)
+            return
 
         try:
             # Extract paper IDs from question (e.g., "paper 5", "papers 3 and 7")
             paper_ids = re.findall(r"paper\s+(\d+)", query.lower())
             paper_ids = [int(pid) for pid in paper_ids]
 
-            # TODO: Get the actual answer from ask_command
-            # For now, ask_command doesn't return the answer, it just prints it
-            # We'll need to modify ask_command to return the response
             ask_command(
                 question=query,
                 db=self.db_path,
@@ -253,6 +261,93 @@ No special command needed! Just type naturally:
             console.print("\n[yellow]Query interrupted[/yellow]")
         except Exception as e:
             console.print(f"[red]Query failed: {e}[/red]")
+
+    def handle_litreview(self, query: str) -> None:
+        """Handle a literature review request."""
+        from ..db.repository import Repository
+        from ..llm.providers import LLMRouter
+        from ..llm.rate_limits import RateLimitStore
+        from ..llm.litreview import LiteratureReviewEngine
+        from ..llm.question_parser import extract_paper_ids
+        from ..core.docx_writer import write_litreview_docx
+        from . import output
+
+        try:
+            with Repository(self.db_path) as repo:
+                # Paper selection
+                ids = extract_paper_ids(query)
+                if ids:
+                    papers = repo.get_papers_by_ids(ids)
+                    if not papers:
+                        output.print_error(
+                            "None of the specified paper IDs were found."
+                        )
+                        return
+                else:
+                    papers = repo.list_papers(limit=20)
+                    if not papers:
+                        output.print_error("No papers in library. Run /sync first.")
+                        return
+
+                if len(papers) < 1:
+                    output.print_error("No papers found for the literature review.")
+                    return
+
+                # Topic extraction: strip lit-review keywords and paper refs
+                topic = _LIT_REVIEW_RE.sub("", query)
+                topic = re.sub(
+                    r"\b(on|about|for|of|the)\b", "", topic, flags=re.IGNORECASE
+                )
+                topic = re.sub(
+                    r"\bpapers?\s+\d+(?:[,\s]+\d+)*", "", topic, flags=re.IGNORECASE
+                )
+                topic = re.sub(r"\s+", " ", topic).strip(" .,?")
+                if not topic:
+                    topic = "Research Library"
+
+                console.print(
+                    f"\n[bold cyan]Literature Review:[/bold cyan] {topic}"
+                    f"\n[dim]Covering {len(papers)} papers — this may take a few minutes...[/dim]\n"
+                )
+
+                llm_router = LLMRouter(rate_store=RateLimitStore(), cache_enabled=False)
+
+                if not llm_router.is_available():
+                    output.print_error(
+                        "No LLM available. Please configure GROQ_API_KEY."
+                    )
+                    return
+
+                engine = LiteratureReviewEngine(repo, llm_router)
+
+                with console.status(
+                    "[bold cyan]Starting...[/bold cyan]", spinner="dots"
+                ) as status:
+
+                    def progress(msg: str) -> None:
+                        status.update(f"[bold cyan]{msg}[/bold cyan]")
+
+                    result = engine.generate(papers, topic, progress_cb=progress)
+
+            # Ask for save folder
+            console.print("\n[bold]Where should I save the .docx?[/bold]")
+            console.print("[dim]Press Enter for ~/Desktop[/dim]")
+            raw = input("Folder path: ").strip()
+            folder = Path(raw).expanduser() if raw else Path.home() / "Desktop"
+
+            safe_topic = re.sub(r"[^\w\s-]", "", topic).strip().replace(" ", "_")[:40]
+            filename = f"literature_review_{safe_topic}.docx"
+            output_path = folder / filename
+
+            write_litreview_docx(result, output_path)
+            output.print_success(f"Saved: {output_path}")
+
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Literature review interrupted.[/yellow]")
+        except RuntimeError as e:
+            output.print_error(str(e))
+        except Exception as e:
+            output.print_error(f"Literature review failed: {e}")
 
     def run(self):
         """Run the REPL loop."""

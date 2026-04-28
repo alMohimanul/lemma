@@ -38,6 +38,7 @@ setup(
         "httpx>=0.26.0",
         "rich>=13.7.0",
         "python-dotenv>=1.0.0",
+        "python-docx>=0.8.11",
     ],
     entry_points={
         "console_scripts": [

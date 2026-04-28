@@ -448,3 +448,135 @@ Keep the synthesis comprehensive but concise (400-500 words). Use paper IDs [1],
 COMPREHENSIVE COMPARISON:"""
 
     return prompt
+
+
+# ── Literature Review prompts ────────────────────────────────────────────────
+
+
+def build_litreview_paper_summary_prompt(
+    title: str, authors: str, year: str, abstract: str
+) -> str:
+    return f"""You are preparing material for an academic literature review.
+
+Paper: "{title}"
+Authors: {authors} ({year})
+Abstract: {abstract}
+
+Write a structured summary covering:
+1. Research question / objective
+2. Methodology / approach
+3. Key findings and results
+4. Contribution to the field
+
+Be thorough and precise. Preserve specific technical details, numbers, and named methods — these matter in a literature review.
+
+SUMMARY:"""
+
+
+def build_litreview_theme_identification_prompt(
+    paper_summaries: str, topic: str
+) -> str:
+    return f"""You are organizing an academic literature review on: "{topic}"
+
+Here are summaries of the papers to be reviewed:
+{paper_summaries}
+
+Identify 3 to 5 major research themes that cut across these papers. For each theme:
+- Give it a concise academic name (e.g. "Attention Mechanisms in Transformers")
+- Write 1–2 sentences describing what the theme covers
+- List the paper IDs (numbers) whose work falls under this theme
+
+Respond in this exact format for each theme:
+THEME: <name>
+DESCRIPTION: <1-2 sentences>
+PAPERS: <comma-separated IDs>
+---
+
+Identify only themes genuinely supported by multiple papers. Every paper must appear in at least one theme.
+
+THEMES:"""
+
+
+def build_litreview_theme_section_prompt(
+    theme_name: str, theme_desc: str, relevant_summaries: str
+) -> str:
+    return f"""You are writing the "{theme_name}" section of an academic literature review.
+
+Theme description: {theme_desc}
+
+Relevant papers:
+{relevant_summaries}
+
+Write a cohesive academic section (400–600 words) that:
+- Introduces the theme and its significance
+- Synthesizes how the papers approach this theme
+- Highlights agreements, tensions, and complementary findings
+- Uses in-text citations as [Author Year] or [PaperID]
+
+Write in formal academic prose. Do not use bullet points. Be substantive.
+
+SECTION:"""
+
+
+def build_litreview_introduction_prompt(
+    topic: str, paper_list: str, theme_names: str
+) -> str:
+    return f"""You are writing the Introduction section of an academic literature review on: "{topic}"
+
+Papers included in this review:
+{paper_list}
+
+The review is structured around these themes:
+{theme_names}
+
+Write an Introduction (350–500 words) that:
+- Establishes the importance and context of the research area
+- States the scope and objectives of this literature review
+- Briefly describes how the review is organized (mention the themes)
+- Does NOT summarize findings — save that for the body sections
+
+Write in formal academic prose.
+
+INTRODUCTION:"""
+
+
+def build_litreview_gaps_prompt(paper_summaries: str, theme_sections: str) -> str:
+    return f"""You are writing the "Research Gaps and Future Directions" section of an academic literature review.
+
+Paper summaries:
+{paper_summaries}
+
+Synthesized theme sections:
+{theme_sections}
+
+Write a substantive section (350–500 words) that:
+- Identifies what questions remain unanswered across these papers
+- Highlights methodological limitations present in the body of work
+- Points to underexplored areas or contradictions between papers
+- Suggests concrete directions for future research
+
+Be specific — cite which papers have which gaps. Write in formal academic prose.
+
+RESEARCH GAPS AND FUTURE DIRECTIONS:"""
+
+
+def build_litreview_conclusion_prompt(
+    topic: str, theme_names: str, gaps_text: str
+) -> str:
+    return f"""You are writing the Conclusion of an academic literature review on: "{topic}"
+
+The review covered these themes:
+{theme_names}
+
+The identified research gaps were:
+{gaps_text}
+
+Write a Conclusion (250–350 words) that:
+- Synthesizes the overall state of knowledge in this area
+- Restates the most important collective insights from the papers
+- Connects back to the gaps and what they mean for the field
+- Ends with a forward-looking statement
+
+Write in formal academic prose. Do not introduce new citations.
+
+CONCLUSION:"""

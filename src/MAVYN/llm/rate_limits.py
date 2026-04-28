@@ -39,7 +39,7 @@ class RateLimitStore:
     def _load(self) -> dict:
         if self._path.exists():
             try:
-                return json.loads(self._path.read_text())
+                return dict(json.loads(self._path.read_text()))
             except (json.JSONDecodeError, OSError):
                 pass
         return {}

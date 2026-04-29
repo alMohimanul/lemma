@@ -291,14 +291,13 @@ def pack_context(
     Each excerpt: {'paper_id': int, 'text': str, 'section': str, 'score': float}
     Returns (context_string, list_of_included_paper_ids).
     """
-    # Stable display numbering: assign in score-descending order
+    # Use actual lemma IDs as display numbers so the LLM labels match what the
+    # user types ("paper 3" → [Paper 3 | …] in context, not "Paper 2").
     nums: Dict[int, int] = {}
-    n = 1
-    for exc in sorted(excerpts, key=lambda x: -x.get("score", 0)):
+    for exc in excerpts:
         pid = exc["paper_id"]
         if pid not in nums:
-            nums[pid] = n
-            n += 1
+            nums[pid] = pid
 
     blocks: List[str] = []
     used = 0
@@ -531,12 +530,32 @@ class AlignedExtractor:
         section_name: str,
         token_budget: int = TOKEN_BUDGET_COMPARE_PER,
     ) -> str:
-        """Best-effort section text for one paper, importance-sorted, budget-capped."""
+        """Best-effort section text for one paper, importance-sorted, budget-capped.
+
+        Falls back to BM25 over all paper chunks when the section_name label is
+        absent (e.g. because PDF extraction collapsed section headings into a
+        surrounding block and they were never stored as a distinct section).
+        """
         chunks = self.repo.get_section_embeddings(paper_id, section_name)
         valid = sorted(
             [c for c in chunks if c.text_content],
             key=lambda c: -c.importance_score,
         )
+
+        # BM25 fallback: section heading not found in stored labels — rank all
+        # paper chunks by keyword relevance and take the top scorers.
+        if not valid:
+            all_chunks = [
+                c
+                for c in self.repo.get_embeddings_by_paper(paper_id)
+                if c.is_valid and c.text_content
+            ]
+            if all_chunks:
+                corpus = [c.text_content for c in all_chunks]
+                bm25 = BM25(corpus)
+                ranked = bm25.top_n(section_name, n=5)
+                valid = [all_chunks[i] for i, score in ranked if score > 0]
+
         char_budget = token_budget * 4
         text = ""
         for c in valid:

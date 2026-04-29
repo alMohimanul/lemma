@@ -85,6 +85,30 @@ def wants_similar_papers(question: str) -> bool:
     return any(re.search(p, q) for p in SIMILAR_PAPERS_PATTERNS)
 
 
+_LIST_SECTIONS_PATTERNS = [
+    r"\blist\s+(?:the\s+)?sections?\b",
+    r"\bshow\s+(?:me\s+)?(?:the\s+)?sections?\b",
+    r"\bwhat\s+sections?\s+(?:does|do|are\s+in|are\s+there)\b",
+    r"\bwhich\s+sections?\s+(?:does|do|are\s+in|are\s+there)\b",
+    r"\bsections?\s+(?:does|do)\s+(?:this|the)\s+paper\s+have\b",
+    r"\bwhat(?:'s| is| are)\s+(?:the\s+)?sections?\s+(?:in|of)\b",
+    r"\bsections?\s+(?:in|of)\s+(?:this|the)\s+paper\b",
+    r"\btable\s+of\s+contents?\b",
+    r"\bpaper\s+structure\b",
+    r"\bhow\s+is\s+(?:this\s+|the\s+)?paper\s+(?:organized|structured|divided)\b",
+]
+
+
+def wants_list_sections(question: str) -> bool:
+    """True when the user wants to enumerate which sections a paper has.
+
+    Only matches *listing* intent, not *content* intent — so
+    "summarize the results section" returns False.
+    """
+    q = question.lower()
+    return any(re.search(p, q) for p in _LIST_SECTIONS_PATTERNS)
+
+
 def extract_seed_paper_ids_for_similar(question: str) -> List[int]:
     """Paper IDs named as seeds for similarity search (e.g. 'like paper 7').
 

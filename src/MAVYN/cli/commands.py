@@ -1,7 +1,8 @@
 """CLI commands for lemma paper manager."""
 import os
+import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import click
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -18,6 +19,61 @@ from .setup_wizard import run_setup_wizard, is_first_run
 # Load environment variables from .env file and ~/.MAVYN/.env
 load_dotenv()  # Load from current directory
 load_dotenv(Path.home() / ".MAVYN" / ".env")  # Load from config directory
+
+
+def _extract_cited_paper_ids(answer_text: str) -> Set[int]:
+    """Return the set of lemma paper IDs cited as [Paper N] in an LLM answer."""
+    return {int(m) for m in re.findall(r"\[Paper\s+(\d+)", answer_text)}
+
+
+def _display_sections_list(
+    sections_by_paper: Dict[int, List[str]],
+    repo,
+) -> None:
+    """Print a Rich Panel per paper listing its stored section names."""
+    from rich.panel import Panel
+    from rich import box as rbox
+
+    for paper_id, section_names in sections_by_paper.items():
+        paper_obj = repo.get_paper_by_id(paper_id)
+        title = (paper_obj.title or "Untitled") if paper_obj else f"Paper {paper_id}"
+
+        if not section_names:
+            output.console.print(
+                Panel(
+                    "[dim]No sections indexed. Run [bold]lemma embed[/bold] first.[/dim]",
+                    title=f"[bold cyan][{paper_id}] {title}[/bold cyan]",
+                    border_style="yellow",
+                    box=rbox.ROUNDED,
+                )
+            )
+            continue
+
+        body = "\n".join(
+            f"  [cyan]{i:>2}.[/cyan] {name}" for i, name in enumerate(section_names, 1)
+        )
+        output.console.print(
+            Panel(
+                body,
+                title=f"[bold cyan][{paper_id}] {title}[/bold cyan]",
+                border_style="cyan",
+                box=rbox.ROUNDED,
+            )
+        )
+
+    example_section = next(
+        (s for snames in sections_by_paper.values() for s in snames), None
+    )
+    first_pid = next(iter(sections_by_paper), None)
+    if example_section and first_pid is not None:
+        output.console.print(
+            f'\n[dim]Tip: Ask [bold]"summarize the {example_section} section of '
+            f'paper {first_pid}"[/bold] to dive into a section.[/dim]'
+        )
+    else:
+        output.console.print(
+            "[dim]Tip: Run [bold]lemma embed[/bold] to index paper sections.[/dim]"
+        )
 
 
 @click.group()
@@ -359,6 +415,7 @@ def ask(
     from ..llm.question_parser import (
         parse_comparison_request,
         wants_similar_papers,
+        wants_list_sections,
         extract_seed_paper_ids_for_similar,
         extract_paper_ids,
     )
@@ -708,6 +765,26 @@ def ask(
                 output.print_error(f"Failed to generate answer: {e}")
             return
 
+        # ── List Sections — no-LLM early return ─────────────────────────────
+        if wants_list_sections(question):
+            _ls_ids: List[int] = []
+            for pid in extract_paper_ids(question):
+                if repo.get_paper_by_id(pid):
+                    _ls_ids.append(pid)
+                else:
+                    output.print_warning(f"Paper id {pid} not found in library.")
+
+            if not _ls_ids:
+                output.print_error(
+                    "No paper specified. Mention a paper (e.g. 'paper 3' or '[3]'), "
+                    "or first ask a question about a paper to set session context."
+                )
+                return
+
+            sections_by_paper = repo.get_all_section_names_for_papers(_ls_ids)
+            _display_sections_list(sections_by_paper, repo)
+            return
+
         # Q&A / Summarize flow — task-aware retrieval
 
         from ..embeddings.retrieval import (
@@ -942,10 +1019,14 @@ def ask(
                 output.print_error("Failed to generate answer from LLM")
                 return
 
-            # Display answer
-            sources = [
-                f"[{p['id']}] {p['title']} ({p['year']})" for p in context_papers
-            ]
+            # Display answer — only show papers the LLM actually cited
+            cited_ids = _extract_cited_paper_ids(response.text)
+            cited_papers = (
+                [p for p in context_papers if p["id"] in cited_ids]
+                if cited_ids
+                else context_papers
+            )
+            sources = [f"[{p['id']}] {p['title']} ({p['year']})" for p in cited_papers]
             output.print_answer(question, response.text, sources)
 
             # Show provider info
@@ -1157,12 +1238,28 @@ def embed(
 
             for paper in papers:
                 try:
-                    # Extract full text
                     paper_path = Path(paper.file_path)
                     if not paper_path.exists():
                         raise FileNotFoundError(f"PDF not found: {paper_path}")
 
-                    full_text = extractor.extract_full_text(paper_path)
+                    # Try Docling first; fall back to plain-text on failure
+                    docling_chunks = None
+                    full_text = None
+                    try:
+                        from ..embeddings.docling_chunker import chunk_pdf_with_docling
+
+                        docling_chunks = chunk_pdf_with_docling(paper_path)
+                        full_text = " ".join(c.text for c in docling_chunks)
+                    except ImportError:
+                        pass
+                    except Exception as exc:
+                        logger.warning(
+                            f"Docling failed for {paper_path.name} ({exc}); "
+                            "using plain-text fallback"
+                        )
+
+                    if full_text is None:
+                        full_text = extractor.extract_full_text(paper_path)
 
                     if not full_text or len(full_text.strip()) < 100:
                         raise ValueError("Insufficient text extracted from PDF")
@@ -1170,11 +1267,19 @@ def embed(
                     # Use incremental embedder if enabled, otherwise use legacy
                     if incremental and not force:
                         result = embedder.incremental_embed(
-                            paper, full_text, extractor, force=False
+                            paper,
+                            full_text,
+                            extractor,
+                            force=False,
+                            chunks=docling_chunks,
                         )
                     else:
                         result = embedder.incremental_embed(
-                            paper, full_text, extractor, force=True
+                            paper,
+                            full_text,
+                            extractor,
+                            force=True,
+                            chunks=docling_chunks,
                         )
 
                     if not result.success:

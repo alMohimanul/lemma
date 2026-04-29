@@ -132,15 +132,25 @@ class IncrementalEmbedder:
         return False
 
     def incremental_embed(
-        self, paper, full_text: str, extractor, force: bool = False
+        self,
+        paper,
+        full_text: str,
+        extractor,
+        force: bool = False,
+        chunks: Optional[List] = None,
     ) -> EmbedResult:
         """Perform incremental embedding with chunk reuse.
 
         Args:
             paper: Paper database model instance
-            full_text: Current extracted text from PDF
+            full_text: Current extracted text from PDF (used for content-hash
+                change detection; when ``chunks`` is provided this may be the
+                joined chunk text rather than raw PDF text).
             extractor: MetadataExtractor instance for text extraction
             force: If True, force full re-embedding
+            chunks: Optional pre-computed list of Chunk objects (e.g. from
+                DoclingPaperChunker).  When supplied the internal
+                ``self.chunker.chunk(full_text)`` step is skipped entirely.
 
         Returns:
             EmbedResult with statistics
@@ -165,8 +175,10 @@ class IncrementalEmbedder:
                     time_saved_pct=100.0,
                 )
 
-            # Chunk the text
-            chunks = self.chunker.chunk(full_text)
+            # Chunk the text — use caller-supplied chunks when available
+            # (e.g. from Docling), otherwise fall back to the legacy chunker.
+            if chunks is None:
+                chunks = self.chunker.chunk(full_text)
 
             if not chunks:
                 raise ValueError("No chunks generated from text")

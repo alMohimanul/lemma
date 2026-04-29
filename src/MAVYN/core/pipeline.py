@@ -276,21 +276,49 @@ class PaperProcessingPipeline:
             True if embedding successful
         """
         try:
-            # Extract full text
             paper_path = Path(paper.file_path)
             if not paper_path.exists():
                 logger.error(f"PDF not found: {paper_path}")
                 return False
 
-            full_text = self.extractor.extract_full_text(paper_path)
+            # ── Stage 1: Extract text + chunks ───────────────────────────────
+            # Try Docling first (AI layout model — correctly detects numbered
+            # section headings like "3. Results" and two-column layouts).
+            # Fall back to plain-text extraction if Docling is unavailable or
+            # the conversion fails.
+            docling_chunks = None
+            full_text = None
+
+            try:
+                from ..embeddings.docling_chunker import chunk_pdf_with_docling
+
+                docling_chunks = chunk_pdf_with_docling(paper_path)
+                # Synthesise full_text from chunk text for content-hash tracking
+                full_text = " ".join(c.text for c in docling_chunks)
+                logger.info(
+                    f"Docling extraction succeeded for {paper_path.name} "
+                    f"({len(docling_chunks)} chunks)"
+                )
+            except ImportError:
+                logger.debug("docling not installed — using legacy text extraction")
+            except Exception as exc:
+                logger.warning(
+                    f"Docling failed for {paper_path.name} ({exc}); "
+                    "falling back to plain-text extraction"
+                )
+
+            if full_text is None:
+                full_text = self.extractor.extract_full_text(paper_path)
 
             if not full_text or len(full_text.strip()) < 100:
                 logger.warning(f"Insufficient text extracted from {paper_path.name}")
                 return False
 
-            # Use incremental embedder
+            # ── Stage 2: Embed ────────────────────────────────────────────────
+            # Pass pre-computed Docling chunks when available so the embedder
+            # skips its internal chunker (which uses regex-based detection).
             embed_result = self.embedder.incremental_embed(
-                paper, full_text, self.extractor, force=False
+                paper, full_text, self.extractor, force=False, chunks=docling_chunks
             )
 
             if not embed_result.success:

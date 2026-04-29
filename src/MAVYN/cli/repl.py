@@ -59,6 +59,7 @@ class MAVYNRepl:
         self.history: List[str] = []
         self.session_id: Optional[str] = None
         self.conversation_context: List[dict[str, Any]] = []  # Recent Q&A for context
+        self.last_paper_ids: List[int] = []  # Paper IDs from the most recent question
 
     def print_welcome(self):
         """Print welcome message."""
@@ -239,12 +240,23 @@ No special command needed! Just type naturally:
             return
 
         try:
-            # Extract paper IDs from question (e.g., "paper 5", "papers 3 and 7")
-            paper_ids = re.findall(r"paper\s+(\d+)", query.lower())
-            paper_ids = [int(pid) for pid in paper_ids]
+            # Extract paper IDs explicitly mentioned in this turn
+            explicit_ids = [int(m) for m in re.findall(r"paper\s+(\d+)", query.lower())]
+
+            # If none mentioned but we have context from a prior turn, pin those papers
+            # by appending their IDs to the query so ask_command's extract_paper_ids
+            # picks them up and guarantees they appear in the retrieval context.
+            effective_query = query
+            if not explicit_ids and self.last_paper_ids:
+                id_hint = " ".join(f"[{pid}]" for pid in self.last_paper_ids)
+                effective_query = f"{query} {id_hint}"
+
+            # Update session focus for the next turn
+            if explicit_ids:
+                self.last_paper_ids = explicit_ids
 
             ask_command(
-                question=query,
+                question=effective_query,
                 db=self.db_path,
                 top_k=5,
                 index_path="~/.MAVYN/search.index",
@@ -252,10 +264,6 @@ No special command needed! Just type naturally:
                 arxiv_cli=False,
                 no_arxiv_cli=False,
             )
-
-            # TODO: Save conversation turn to database
-            # This requires modifying ask_command to return response data
-            # For now, we'll implement this in Phase 2
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Query interrupted[/yellow]")

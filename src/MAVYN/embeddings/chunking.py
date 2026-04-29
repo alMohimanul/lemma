@@ -96,8 +96,11 @@ class PaperChunker:
 
     # Regex patterns for section detection
     SECTION_PATTERNS = [
-        # Numbered sections: "1. Introduction", "2.1 Background"
+        # Numbered sections on their own line: "1. Introduction", "2.1 Background"
         re.compile(r"^\s*(\d+\.(?:\d+\.?)*)\s+([A-Z][^\n]{2,100})\s*$", re.MULTILINE),
+        # Numbered sections at start of a paragraph (PDF extraction sometimes
+        # merges the heading into the next line): "3. Results\nThe model..."
+        re.compile(r"^\s*(\d+\.(?:\d+\.?)*)\s+([A-Z][^\n]{2,80})\n", re.MULTILINE),
         # Keyword-based sections
         re.compile(
             r"^\s*(Abstract|Introduction|Background|Related Work|Methods?|"

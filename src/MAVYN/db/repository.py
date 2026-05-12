@@ -250,7 +250,7 @@ class Repository:
         text_content: str,
         embedding_vector: List[float],
         chunk_index: int = 0,
-        model_name: str = "all-MiniLM-L6-v2",
+        model_name: str = "BAAI/bge-m3",
         chunk_hash: Optional[str] = None,
         chunk_type: str = "paragraph",
         section_name: Optional[str] = None,

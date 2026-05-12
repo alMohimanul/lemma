@@ -82,7 +82,7 @@ class Embedding(Base):
     chunk_index = Column(Integer, default=0)  # For chunked embeddings
     text_content = Column(Text)  # Original text that was embedded
     embedding_vector = Column(Text)  # JSON-serialized vector (for backup/portability)
-    model_name = Column(String(128), default="all-MiniLM-L6-v2")
+    model_name = Column(String(128), default="BAAI/bge-m3")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Incremental embedding and advanced chunking metadata

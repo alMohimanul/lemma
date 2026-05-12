@@ -34,12 +34,12 @@ except ImportError:
 class EmbeddingEncoder:
     """Generate embeddings using sentence-transformers models."""
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "BAAI/bge-m3"):
         """Initialize encoder with a specific model.
 
         Args:
             model_name: Name of sentence-transformers model to use
-                       Default: all-MiniLM-L6-v2 (384 dimensions, fast)
+                       Default: BAAI/bge-m3 (1024 dimensions, multilingual)
         """
         if SentenceTransformer is None:
             raise ImportError(

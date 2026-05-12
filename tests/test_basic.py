@@ -76,4 +76,4 @@ def test_encoder_basic():
     encoder = EmbeddingEncoder()
     embedding = encoder.encode("Test sentence")
     assert isinstance(embedding, np.ndarray)
-    assert len(embedding) == 384
+    assert len(embedding) == encoder.embedding_dim

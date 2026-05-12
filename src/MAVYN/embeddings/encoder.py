@@ -54,7 +54,7 @@ class EmbeddingEncoder:
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
         self.model = SentenceTransformer(model_name)
-        self.embedding_dim = self.model.get_sentence_embedding_dimension()
+        self.embedding_dim = self.model.get_embedding_dimension()
 
     def encode(self, text: str) -> np.ndarray:
         """Encode a single text into an embedding vector.

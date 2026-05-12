@@ -103,27 +103,6 @@ No account required to use local features.
 
 ---
 
-## Recording the demo GIF
-
-To record the `assets/demo.gif` shown above, install [VHS](https://github.com/charmbracelet/vhs) and run:
-
-```bash
-brew install vhs
-vhs demo.tape
-```
-
-Or use [Terminalizer](https://github.com/faressoft/terminalizer):
-
-```bash
-npm install -g terminalizer
-terminalizer record demo --skip-sharing
-terminalizer render demo
-```
-
-Place the output at `assets/demo.gif`.
-
----
-
 ## License
 
 MIT — see [LICENSE](LICENSE)

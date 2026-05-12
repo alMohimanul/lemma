@@ -173,12 +173,12 @@ def _initialize_paper_versions(repo: Repository):
 
         for paper in papers:
             # Set content_version to 1 for all existing papers
-            paper.content_version = 1
+            paper.content_version = 1  # type: ignore[assignment]
 
             # If paper has embeddings, set last_embedded_version
-            embeddings = repo.get_embeddings_by_paper(paper.id)
+            embeddings = repo.get_embeddings_by_paper(int(paper.id))
             if embeddings:
-                paper.last_embedded_version = 1
+                paper.last_embedded_version = 1  # type: ignore[assignment]
 
                 # Try to compute content hash
                 try:
@@ -188,7 +188,7 @@ def _initialize_paper_versions(repo: Repository):
                         content_hash = hashlib.sha256(
                             full_text.encode("utf-8")
                         ).hexdigest()
-                        paper.content_hash = content_hash
+                        paper.content_hash = content_hash  # type: ignore[assignment]
                         logger.debug(f"Computed content hash for paper {paper.id}")
                 except Exception as e:
                     logger.warning(
@@ -214,7 +214,7 @@ def _compute_chunk_hashes(repo: Repository):
                 chunk_hash = hashlib.sha256(
                     embedding.text_content.encode("utf-8")
                 ).hexdigest()
-                embedding.chunk_hash = chunk_hash
+                embedding.chunk_hash = chunk_hash  # type: ignore[assignment]
                 count += 1
 
         session.commit()

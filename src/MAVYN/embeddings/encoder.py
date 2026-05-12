@@ -28,18 +28,18 @@ logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 try:
     from sentence_transformers import SentenceTransformer
 except ImportError:
-    SentenceTransformer = None
+    SentenceTransformer = None  # type: ignore[assignment,misc]
 
 
 class EmbeddingEncoder:
     """Generate embeddings using sentence-transformers models."""
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "BAAI/bge-m3"):
         """Initialize encoder with a specific model.
 
         Args:
             model_name: Name of sentence-transformers model to use
-                       Default: all-MiniLM-L6-v2 (384 dimensions, fast)
+                       Default: BAAI/bge-m3 (1024 dimensions, multilingual)
         """
         if SentenceTransformer is None:
             raise ImportError(
@@ -54,7 +54,7 @@ class EmbeddingEncoder:
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
         self.model = SentenceTransformer(model_name)
-        self.embedding_dim = self.model.get_sentence_embedding_dimension()
+        self.embedding_dim = self.model.get_embedding_dimension()
 
     def encode(self, text: str) -> np.ndarray:
         """Encode a single text into an embedding vector.
@@ -65,7 +65,7 @@ class EmbeddingEncoder:
         Returns:
             Numpy array of shape (embedding_dim,)
         """
-        return self.model.encode(text, convert_to_numpy=True)
+        return np.array(self.model.encode(text, convert_to_numpy=True))
 
     def encode_batch(self, texts: List[str], batch_size: int = 32) -> np.ndarray:
         """Encode multiple texts into embedding vectors.
@@ -77,11 +77,13 @@ class EmbeddingEncoder:
         Returns:
             Numpy array of shape (len(texts), embedding_dim)
         """
-        return self.model.encode(
-            texts,
-            batch_size=batch_size,
-            convert_to_numpy=True,
-            show_progress_bar=len(texts) > 10,
+        return np.array(
+            self.model.encode(
+                texts,
+                batch_size=batch_size,
+                convert_to_numpy=True,
+                show_progress_bar=len(texts) > 10,
+            )
         )
 
     def chunk_text(

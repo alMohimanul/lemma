@@ -91,8 +91,7 @@ def test_embedding_dimensions():
 
     embedding = encoder.encode(text)
 
-    # all-MiniLM-L6-v2 produces 384-dimensional embeddings
-    assert embedding.shape[0] == 384
+    assert embedding.shape[0] == encoder.embedding_dim
 
 
 def test_normalize_embeddings():

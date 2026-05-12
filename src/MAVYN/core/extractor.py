@@ -7,12 +7,12 @@ from dataclasses import dataclass, asdict
 try:
     import PyPDF2
 except ImportError:
-    PyPDF2 = None
+    PyPDF2 = None  # type: ignore[assignment]
 
 try:
     import pdfplumber
 except ImportError:
-    pdfplumber = None
+    pdfplumber = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -143,9 +143,9 @@ class MetadataExtractor:
         if PyPDF2:
             try:
                 with open(pdf_path, "rb") as f:
-                    pdf = PyPDF2.PdfReader(f)
-                    for i in range(min(max_pages, len(pdf.pages))):
-                        page = pdf.pages[i]
+                    pypdf_reader = PyPDF2.PdfReader(f)
+                    for i in range(min(max_pages, len(pypdf_reader.pages))):
+                        page = pypdf_reader.pages[i]
                         text += page.extract_text() or ""
                         text += "\n\n"
 
@@ -158,10 +158,10 @@ class MetadataExtractor:
         # Fallback to pdfplumber (more robust for complex PDFs)
         if pdfplumber:
             try:
-                with pdfplumber.open(pdf_path) as pdf:
-                    for i in range(min(max_pages, len(pdf.pages))):
-                        page = pdf.pages[i]
-                        text += page.extract_text() or ""
+                with pdfplumber.open(pdf_path) as plumber_pdf:
+                    for i in range(min(max_pages, len(plumber_pdf.pages))):
+                        plumber_page = plumber_pdf.pages[i]
+                        text += plumber_page.extract_text() or ""
                         text += "\n\n"
             except Exception:
                 pass
@@ -259,8 +259,8 @@ class MetadataExtractor:
         if PyPDF2:
             try:
                 with open(pdf_path, "rb") as f:
-                    pdf = PyPDF2.PdfReader(f)
-                    for page in pdf.pages:
+                    pypdf_reader = PyPDF2.PdfReader(f)
+                    for page in pypdf_reader.pages:
                         text += page.extract_text() or ""
                         text += "\n\n"
 
@@ -272,9 +272,9 @@ class MetadataExtractor:
         # Fallback to pdfplumber
         if pdfplumber:
             try:
-                with pdfplumber.open(pdf_path) as pdf:
-                    for page in pdf.pages:
-                        text += page.extract_text() or ""
+                with pdfplumber.open(pdf_path) as plumber_pdf:
+                    for plumber_page in plumber_pdf.pages:
+                        text += plumber_page.extract_text() or ""
                         text += "\n\n"
             except Exception:
                 pass

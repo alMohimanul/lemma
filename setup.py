@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="mavyn",
-    version="2.1.0",
+    version="2.2.0",
     author="Mahir",
     author_email="aislam192054@gmail.com",
     description="Local-first paper manager with semantic search and LLM reasoning",
@@ -16,7 +16,7 @@ setup(
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Science/Research",
         "Topic :: Scientific/Engineering",
         "License :: OSI Approved :: MIT License",

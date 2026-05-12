@@ -28,7 +28,7 @@ logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 try:
     from sentence_transformers import SentenceTransformer
 except ImportError:
-    SentenceTransformer = None
+    SentenceTransformer = None  # type: ignore[assignment,misc]
 
 
 class EmbeddingEncoder:
@@ -65,7 +65,7 @@ class EmbeddingEncoder:
         Returns:
             Numpy array of shape (embedding_dim,)
         """
-        return self.model.encode(text, convert_to_numpy=True)
+        return np.array(self.model.encode(text, convert_to_numpy=True))
 
     def encode_batch(self, texts: List[str], batch_size: int = 32) -> np.ndarray:
         """Encode multiple texts into embedding vectors.
@@ -77,11 +77,13 @@ class EmbeddingEncoder:
         Returns:
             Numpy array of shape (len(texts), embedding_dim)
         """
-        return self.model.encode(
-            texts,
-            batch_size=batch_size,
-            convert_to_numpy=True,
-            show_progress_bar=len(texts) > 10,
+        return np.array(
+            self.model.encode(
+                texts,
+                batch_size=batch_size,
+                convert_to_numpy=True,
+                show_progress_bar=len(texts) > 10,
+            )
         )
 
     def chunk_text(

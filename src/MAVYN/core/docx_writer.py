@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from docx import Document
+from docx.document import Document as DocxDocument
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
@@ -66,13 +67,13 @@ def write_litreview_docx(result: LitReviewResult, output_path: Path) -> None:
     doc.save(str(output_path))
 
 
-def _add_heading(doc: Document, text: str) -> None:
+def _add_heading(doc: DocxDocument, text: str) -> None:
     para = doc.add_heading(text, level=1)
     para.runs[0].font.size = Pt(13)
     para.runs[0].font.color.rgb = RGBColor(0x1A, 0x1A, 0x2E)
 
 
-def _add_body(doc: Document, text: str) -> None:
+def _add_body(doc: DocxDocument, text: str) -> None:
     if not text:
         return
     for paragraph in text.split("\n\n"):

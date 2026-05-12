@@ -83,7 +83,8 @@ class PaperProcessingPipeline:
         """Lazy load search index."""
         if self._search_index is None:
             self._search_index = SemanticSearchIndex(
-                embedding_dim=self.encoder.embedding_dim, index_path=self.index_path
+                embedding_dim=self.encoder.embedding_dim or 1024,
+                index_path=self.index_path,
             )
             logger.info(f"Loaded search index with {self._search_index.size()} vectors")
         return self._search_index
@@ -130,8 +131,8 @@ class PaperProcessingPipeline:
             if existing:
                 logger.info(f"Paper already indexed: {file_path.name}")
                 result.success = True
-                result.paper_id = existing.id
-                result.file_path = existing.file_path
+                result.paper_id = int(existing.id)
+                result.file_path = str(existing.file_path)
                 result.stage = "duplicate"
                 return result
 
@@ -151,7 +152,7 @@ class PaperProcessingPipeline:
                 result.error = "Failed to add paper to database"
                 return result
 
-            result.paper_id = paper.id
+            result.paper_id = int(paper.id)
             result.file_path = str(scanned.path)
 
             # Stage 4: Rename (if enabled)
@@ -162,7 +163,7 @@ class PaperProcessingPipeline:
                     result.file_path = str(renamed_path)
                     result.renamed = True
                     # Reload paper to get updated file_path
-                    reloaded_paper = self.repo.get_paper_by_id(paper.id)
+                    reloaded_paper = self.repo.get_paper_by_id(int(paper.id))
                     if reloaded_paper:
                         paper = reloaded_paper
 
@@ -180,7 +181,7 @@ class PaperProcessingPipeline:
             self.repo.log_operation(
                 operation="pipeline",
                 status="success",
-                paper_id=paper.id,
+                paper_id=int(paper.id),
                 details={
                     "original_path": str(file_path),
                     "final_path": result.file_path,
@@ -252,7 +253,7 @@ class PaperProcessingPipeline:
 
                 # Log file operation
                 self.repo.log_file_operation(
-                    paper_id=paper.id,
+                    paper_id=int(paper.id),
                     operation_type="rename",
                     original_path=str(file_path),
                     new_path=str(new_path),
@@ -339,15 +340,15 @@ class PaperProcessingPipeline:
                 chunk_indices = []
 
                 for emb in valid_embeddings:
-                    vec = json.loads(emb.embedding_vector)
+                    vec = json.loads(str(emb.embedding_vector))
                     embedding_vectors.append(vec)
-                    chunk_indices.append(emb.chunk_index)
+                    chunk_indices.append(int(emb.chunk_index))
 
                 embeddings_array = np.array(embedding_vectors, dtype=np.float32)
 
                 self.search_index.add(
                     embeddings=embeddings_array,
-                    paper_id=paper.id,
+                    paper_id=int(paper.id),
                     chunk_indices=chunk_indices,
                 )
 
@@ -385,7 +386,7 @@ class PaperProcessingPipeline:
             file_path = Path(paper.file_path)
             if not file_path.exists():
                 logger.info(f"Removing missing paper: {paper.file_path}")
-                self.repo.delete_paper(paper.id)
+                self.repo.delete_paper(int(paper.id))
                 removed_count += 1
 
         if removed_count > 0:

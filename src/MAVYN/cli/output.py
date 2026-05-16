@@ -215,14 +215,9 @@ def print_search_results(papers: List[dict], query: str) -> None:
 def print_answer(
     question: str, answer: str, sources: Optional[List[str]] = None
 ) -> None:
-    """Print an answer to a question with optional sources.
+    """Print an answer to a question with optional sources."""
+    from rich.markdown import Markdown
 
-    Args:
-        question: The question asked
-        answer: The answer
-        sources: Optional list of source paper IDs/titles
-    """
-    # Print question
     console.print(
         Panel(
             question,
@@ -232,17 +227,15 @@ def print_answer(
         )
     )
 
-    # Print answer
     console.print(
         Panel(
-            answer,
+            Markdown(answer),
             title="[bold green]Answer[/bold green]",
             border_style="green",
             box=box.ROUNDED,
         )
     )
 
-    # Print sources if provided
     if sources:
         console.print("\n[bold]Sources:[/bold]")
         for source in sources:
@@ -280,7 +273,6 @@ def print_comparison_results(result_dict: dict, papers: list) -> None:
         result_dict: Comparison result dictionary from ComparisonResult.to_dict()
         papers: List of Paper objects being compared
     """
-    from rich.table import Table
     from datetime import datetime
 
     # Header with papers being compared
@@ -325,11 +317,13 @@ def print_comparison_results(result_dict: dict, papers: list) -> None:
     else:
         console.print("\n[bold magenta]Whole Paper Comparison[/bold magenta]\n")
 
+    from rich.markdown import Markdown
+
     # Overall summary
     summary = result_dict.get("summary", "No summary available")
     console.print(
         Panel(
-            summary,
+            Markdown(summary),
             title="[bold green]Summary[/bold green]",
             border_style="green",
             box=box.ROUNDED,
@@ -342,39 +336,31 @@ def print_comparison_results(result_dict: dict, papers: list) -> None:
         console.print("\n[bold yellow]Section-by-Section Analysis:[/bold yellow]\n")
 
         for section, comparison_text in section_comparisons.items():
-            # Create table for side-by-side view
-            table = Table(title=f"📄 {section}", box=box.ROUNDED, show_header=True)
-            table.add_column("Section", style="cyan", width=15)
-            table.add_column("Comparison", style="white", width=70)
-
-            table.add_row(
-                section,
-                comparison_text[:500] + "..."
-                if len(comparison_text) > 500
-                else comparison_text,
+            console.print(
+                Panel(
+                    Markdown(comparison_text),
+                    title=f"[bold]{section}[/bold]",
+                    border_style="yellow",
+                    box=box.ROUNDED,
+                )
             )
-
-            console.print(table)
             console.print()
 
     # Full comparison details (for section comparisons)
     details = result_dict.get("details", {})
     if comp_type == "section" and "full_comparison" in details:
-        full_text = details["full_comparison"]
         console.print(
             Panel(
-                full_text,
+                Markdown(details["full_comparison"]),
                 title="[bold blue]Detailed Comparison[/bold blue]",
                 border_style="blue",
                 box=box.ROUNDED,
             )
         )
     elif comp_type == "whole" and "final_synthesis" in details:
-        # For whole-paper, show the synthesis
-        synthesis = details["final_synthesis"]
         console.print(
             Panel(
-                synthesis,
+                Markdown(details["final_synthesis"]),
                 title="[bold blue]Comprehensive Synthesis[/bold blue]",
                 border_style="blue",
                 box=box.ROUNDED,
@@ -384,12 +370,9 @@ def print_comparison_results(result_dict: dict, papers: list) -> None:
     # Provider info
     provider = result_dict.get("provider", "unknown")
     model = result_dict.get("model", "unknown")
-    tokens = result_dict.get("tokens_used", 0)
 
     if provider != "cache" and not result_dict.get("from_cache"):
-        console.print(
-            f"\n[dim]Provider: {provider} | Model: {model} | Tokens: {tokens}[/dim]"
-        )
+        console.print(f"\n[dim]Provider: {provider} | Model: {model}[/dim]")
 
     # Tip for saving
     if not result_dict.get("from_cache"):

@@ -63,6 +63,22 @@ class MetadataExtractor:
         ),
     ]
 
+    # Year patterns ordered by reliability (most specific first)
+    PUBLICATION_YEAR_PATTERNS = [
+        re.compile(
+            r"(?:published|accepted|received|submitted)[^\n]{0,40}?((?:19|20)\d{2})",
+            re.IGNORECASE,
+        ),
+        re.compile(r"(?:©|\(c\)|copyright)\s*((?:19|20)\d{2})", re.IGNORECASE),
+        re.compile(
+            r"(?:proceedings?|conference|workshop|symposium)[^\n]{0,60}?((?:19|20)\d{2})",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:journal|volume|vol\.?)[^\n]{0,40}?((?:19|20)\d{2})", re.IGNORECASE
+        ),
+    ]
+
     def __init__(self):
         """Initialize extractor."""
         if PyPDF2 is None and pdfplumber is None:
@@ -93,6 +109,9 @@ class MetadataExtractor:
             for key, value in regex_metadata.to_dict().items():
                 if getattr(metadata, key) is None:
                     setattr(metadata, key, value)
+            # ArXiv ID encodes submission year — always prefer it over PDF date
+            if regex_metadata.arxiv_id and regex_metadata.year:
+                metadata.year = regex_metadata.year
 
         return metadata
 
@@ -114,15 +133,23 @@ class MetadataExtractor:
                     info = pdf.metadata
 
                     if info:
-                        # Map PDF metadata fields to our schema
                         if hasattr(info, "title") and info.title:
                             metadata.title = self._clean_text(info.title)
                         if hasattr(info, "author") and info.author:
                             metadata.authors = self._clean_text(info.author)
                         if hasattr(info, "subject") and info.subject:
                             metadata.publication = self._clean_text(info.subject)
+                        # Extract year from PDF creation/modification date
+                        for date_key in ("/CreationDate", "/ModDate"):
+                            date_val = info.get(date_key)
+                            if date_val:
+                                date_match = re.search(
+                                    r"((?:19|20)\d{2})", str(date_val)
+                                )
+                                if date_match:
+                                    metadata.year = int(date_match.group(1))
+                                    break
             except Exception:
-                # PDF metadata extraction failed, continue with text extraction
                 pass
 
         return metadata
@@ -189,13 +216,30 @@ class MetadataExtractor:
         if arxiv_match:
             metadata.arxiv_id = arxiv_match.group(1)
 
-        # Extract year (first occurrence, usually publication year)
-        year_match = self.PATTERNS["year"].search(text)
-        if year_match:
-            try:
-                metadata.year = int(year_match.group(0))
-            except ValueError:
-                pass
+        # Extract year — priority chain:
+        # 1. ArXiv ID encodes the submission year (most reliable)
+        if metadata.arxiv_id:
+            metadata.year = self._year_from_arxiv_id(metadata.arxiv_id)
+
+        # 2. Publication-context keywords near a year
+        if not metadata.year:
+            for pattern in self.PUBLICATION_YEAR_PATTERNS:
+                m = pattern.search(text)
+                if m:
+                    try:
+                        metadata.year = int(m.group(1))
+                        break
+                    except ValueError:
+                        pass
+
+        # 3. Fallback: first year in text
+        if not metadata.year:
+            year_match = self.PATTERNS["year"].search(text)
+            if year_match:
+                try:
+                    metadata.year = int(year_match.group(0))
+                except ValueError:
+                    pass
 
         # Extract title (try multiple patterns)
         for pattern in self.TITLE_PATTERNS:
@@ -229,6 +273,20 @@ class MetadataExtractor:
                     metadata.authors = ", ".join(authors[:5])
 
         return metadata
+
+    def _year_from_arxiv_id(self, arxiv_id: str) -> Optional[int]:
+        """Derive publication year from an arXiv ID."""
+        # New format: YYMM.NNNNN (e.g. 2301.12345 → 2023)
+        m = re.match(r"^(\d{2})\d{2}\.\d+", arxiv_id)
+        if m:
+            yy = int(m.group(1))
+            return 2000 + yy
+        # Old format: category/YYMMNNN (e.g. math/9812345 → 1998)
+        m = re.match(r"[a-z.-]+/(\d{2})\d{5}", arxiv_id, re.IGNORECASE)
+        if m:
+            yy = int(m.group(1))
+            return (1900 + yy) if yy >= 91 else (2000 + yy)
+        return None
 
     def _clean_text(self, text: str) -> str:
         """Clean extracted text (remove extra whitespace, etc.).

@@ -736,8 +736,7 @@ def ask(
 
                 if response.provider != "cache":
                     output.print_info(
-                        f"\nProvider: {response.provider} | Model: {response.model} | "
-                        f"Tokens: {response.tokens_used}"
+                        f"\nProvider: {response.provider} | Model: {response.model}"
                     )
                 else:
                     output.print_info("\n[Cached response]")
@@ -1023,7 +1022,7 @@ def ask(
             # Show provider info
             if response.provider != "cache":
                 output.print_info(
-                    f"\nProvider: {response.provider} | Model: {response.model} | Tokens: {response.tokens_used}"
+                    f"\nProvider: {response.provider} | Model: {response.model}"
                 )
             else:
                 output.print_info("\n[Cached response]")
@@ -2076,8 +2075,6 @@ def profile(db: str, all_papers: bool, paper_id: Optional[int]):
     """
     from ..llm.providers import LLMRouter
     from ..llm.rate_limits import RateLimitStore
-    from ..embeddings.retrieval import StructuredExtractor, get_context_budget
-    from ..llm import prompts
 
     with Repository(db) as repo:
         llm_router = LLMRouter(rate_store=RateLimitStore(), cache_enabled=False)
@@ -2106,55 +2103,27 @@ def profile(db: str, all_papers: bool, paper_id: Optional[int]):
             return
 
         output.print_info(f"Generating profiles for {len(targets)} paper(s)...")
-        preferred = llm_router.preferred_model("light")
-        ctx_budget = get_context_budget(preferred)
+
+        from ..llm.summarizer import MapReduceSummarizer
+
+        summarizer = MapReduceSummarizer(repo, llm_router)
 
         ok = 0
         for i, paper in enumerate(targets, 1):
             title = paper.title or "Untitled"
             output.print_info(f"  [{i}/{len(targets)}] {title[:60]}")
             try:
-                context_str, _ = StructuredExtractor(repo).extract(
-                    paper.id, paper, token_budget=ctx_budget
+                profile_data = summarizer.generate_profile(
+                    paper,
+                    notify=lambda msg: output.print_info(f"    {msg}"),
                 )
-                if not context_str.strip():
+                if profile_data is None:
                     output.print_warning(
                         "    No chunks found — run 'lemma embed' first."
                     )
                     continue
 
-                prompt = prompts.build_paper_profile_prompt(
-                    title=title,
-                    authors=paper.authors or "Unknown",
-                    year=str(paper.year or "n.d."),
-                    context=context_str,
-                )
-                response = llm_router.generate(
-                    prompt=prompt, max_tokens=800, tier="light"
-                )
-                if not response:
-                    output.print_warning("    LLM returned no response.")
-                    continue
-
-                parsed = prompts.parse_paper_profile(response.text)
-                full_summary = (
-                    parsed.get("summary", "").strip() or response.text.strip()[:600]
-                )
-
-                repo.upsert_paper_profile(
-                    paper.id,
-                    {
-                        "problem_statement": parsed.get("problem", ""),
-                        "methodology_summary": parsed.get("methodology", ""),
-                        "key_findings": parsed.get("findings", ""),
-                        "contributions": parsed.get("contributions", ""),
-                        "limitations": parsed.get("limitations", ""),
-                        "full_summary": full_summary,
-                        "provider": response.provider,
-                        "model": response.model,
-                        "content_version": paper.content_version,
-                    },
-                )
+                repo.upsert_paper_profile(int(paper.id), profile_data)
                 ok += 1
                 output.print_success("    Profile saved.")
             except Exception as e:

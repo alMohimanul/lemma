@@ -59,10 +59,22 @@ def chunk_pdf_with_docling(
         ImportError: If docling is not installed.
         Exception: If Docling conversion fails (caller should fall back).
     """
-    from docling.document_converter import DocumentConverter
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+
+    # OCR is only needed for scanned PDFs. Academic papers are digital text,
+    # so disable it to avoid downloading and running RapidOCR models.
+    pipeline_options = PdfPipelineOptions()
+    pipeline_options.do_ocr = False
+
+    converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+        }
+    )
 
     logger.info(f"Docling: converting {pdf_path.name}")
-    converter = DocumentConverter()
     result = converter.convert(str(pdf_path))
     md_text = result.document.export_to_markdown()
 

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, Callable
 
 from . import prompts
+from .summarizer import MapReduceSummarizer
 
 logger = logging.getLogger(__name__)
 
@@ -50,24 +51,50 @@ class LiteratureReviewEngine:
                 pass
 
             if profile and profile.full_summary:
-                summary_text = profile.full_summary
+                parts = []
+                if profile.problem_statement:
+                    parts.append(f"PROBLEM: {profile.problem_statement}")
+                if profile.methodology_summary:
+                    parts.append(f"METHODOLOGY: {profile.methodology_summary}")
+                if profile.key_findings:
+                    parts.append(f"FINDINGS: {profile.key_findings}")
+                if profile.contributions:
+                    parts.append(f"CONTRIBUTIONS: {profile.contributions}")
+                if profile.limitations:
+                    parts.append(f"LIMITATIONS: {profile.limitations}")
+                parts.append(f"SUMMARY: {profile.full_summary}")
+                summary_text = "\n".join(parts)
             else:
                 notify(
-                    f"Summarizing paper {i}/{len(papers)}: {paper.title or 'Untitled'}..."
+                    f"Analyzing paper {i}/{len(papers)}: {paper.title or 'Untitled'}..."
                 )
-                abstract = self._get_abstract(paper)
-                prompt = prompts.build_litreview_paper_summary_prompt(
-                    title=paper.title or "Untitled",
-                    authors=paper.authors or "Unknown",
-                    year=str(paper.year or "n.d."),
-                    abstract=abstract,
-                )
-                response = self.llm_router.generate(
-                    prompt=prompt, max_tokens=800, tier="light"
-                )
-                summary_text = (
-                    response.text.strip() if response else "[Summary unavailable]"
-                )
+                summarizer = MapReduceSummarizer(self.repo, self.llm_router)
+                profile_data = summarizer.generate_profile(paper, notify=notify)
+
+                if profile_data:
+                    summary_text = profile_data["full_summary"]
+                    # Cache for future literature reviews
+                    try:
+                        self.repo.upsert_paper_profile(int(paper.id), profile_data)
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not cache profile for paper {paper.id}: {e}"
+                        )
+                else:
+                    # No chunks yet — fall back to abstract
+                    abstract = self._get_abstract(paper)
+                    prompt = prompts.build_litreview_paper_summary_prompt(
+                        title=paper.title or "Untitled",
+                        authors=paper.authors or "Unknown",
+                        year=str(paper.year or "n.d."),
+                        abstract=abstract,
+                    )
+                    response = self.llm_router.generate(
+                        prompt=prompt, max_tokens=800, tier="light"
+                    )
+                    summary_text = (
+                        response.text.strip() if response else "[Summary unavailable]"
+                    )
 
             paper_summaries.append(
                 {

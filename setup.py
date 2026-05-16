@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="mavyn",
-    version="2.3.0",
+    version="2.4.0",
     author="Mahir",
     author_email="aislam192054@gmail.com",
     description="Local-first paper manager with semantic search and LLM reasoning",

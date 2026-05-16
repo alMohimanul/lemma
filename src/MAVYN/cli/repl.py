@@ -81,6 +81,8 @@ Type [cyan]/help[/cyan] for more information."""
 ## Setup & Management
 - `/sync [directory]` - Scan, rename, and embed papers from a directory
 - `/sync --watch` - Continuously monitor directory for new papers
+- `/embed` - Embed all papers into the search index
+- `/embed --force` - Re-embed all papers (use after changing embedding model)
 - `/list` - Show all indexed papers with IDs
 - `/clear` - Clear the terminal screen
 
@@ -126,7 +128,6 @@ No special command needed! Just type naturally:
         args = parts[1] if len(parts) > 1 else ""
 
         if cmd == "exit" or cmd == "quit":
-            console.print("[yellow]Goodbye![/yellow]")
             return False
 
         elif cmd == "help":
@@ -147,6 +148,10 @@ No special command needed! Just type naturally:
 
         elif cmd == "model":
             self.handle_model()
+            return True
+
+        elif cmd == "embed":
+            self.handle_embed(args)
             return True
 
         else:
@@ -192,6 +197,30 @@ No special command needed! Just type naturally:
             )
         except Exception as e:
             console.print(f"[red]Failed to list papers: {e}[/red]")
+
+    def handle_embed(self, args: str):
+        """Handle /embed [--force] command."""
+        from .commands import embed
+
+        force = "--force" in args
+        console.print(
+            "[cyan]Embedding papers into search index...[/cyan]"
+            + (" (force re-embed)" if force else "")
+        )
+        try:
+            if embed.callback is None:
+                console.print("[red]Embed command not available.[/red]")
+                return
+            embed.callback(
+                db=self.db_path,
+                force=force,
+                index_path="~/.MAVYN/search.index",
+                checkpoint_every=10,
+                incremental=not force,
+                strategy="hybrid",
+            )
+        except Exception as e:
+            console.print(f"[red]Embed failed: {e}[/red]")
 
     def handle_model(self):
         """Handle /model command — show Groq model status and rate limit cooldowns."""
@@ -258,7 +287,7 @@ No special command needed! Just type naturally:
             ask_command(
                 question=effective_query,
                 db=self.db_path,
-                top_k=5,
+                top_k=10,
                 index_path="~/.MAVYN/search.index",
                 save=False,
                 arxiv_cli=False,
@@ -402,8 +431,6 @@ No special command needed! Just type naturally:
                         self.handle_natural_language(user_input)
 
                 except EOFError:
-                    # Ctrl+D pressed
-                    console.print("\n[yellow]Goodbye![/yellow]")
                     break
 
                 except KeyboardInterrupt:

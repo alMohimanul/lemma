@@ -207,7 +207,7 @@ def parse_comparison_request(
     paper_ids = extract_paper_ids(question)
 
     if len(paper_ids) < 2:
-        logger.warning(
+        logger.debug(
             f"Comparison request detected but found {len(paper_ids)} paper IDs (need at least 2)"
         )
         return None

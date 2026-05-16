@@ -208,10 +208,54 @@ class ComparisonEngine:
 
         if not common_sections:
             logger.warning(f"No common sections found across papers {paper_ids}")
-            # Fall back to comparing abstracts/titles only
             common_sections = ["Abstract"]
 
-        logger.info(f"Found {len(common_sections)} common sections: {common_sections}")
+        # Cap sections to avoid prompt overflow on small-context models.
+        # Each bucket lists substrings that identify that priority group —
+        # handles varied naming conventions across papers/venues.
+        _PRIORITY_BUCKETS = [
+            ["abstract"],
+            [
+                "introduction",
+                "overview",
+                "background",
+                "motivation",
+                "related",
+                "prior",
+            ],
+            [
+                "method",
+                "approach",
+                "architecture",
+                "model",
+                "framework",
+                "design",
+                "proposed",
+                "system",
+                "technique",
+            ],
+            [
+                "experiment",
+                "evaluation",
+                "result",
+                "finding",
+                "performance",
+                "benchmark",
+                "empirical",
+            ],
+            ["discussion", "analysis", "ablation", "error"],
+            ["conclusion", "limitation", "future", "summary", "remark"],
+        ]
+
+        def _section_priority(s: str) -> int:
+            sl = s.lower()
+            for i, keywords in enumerate(_PRIORITY_BUCKETS):
+                if any(kw in sl for kw in keywords):
+                    return i
+            return len(_PRIORITY_BUCKETS)
+
+        common_sections = sorted(common_sections, key=_section_priority)[:6]
+        logger.info(f"Comparing {len(common_sections)} sections: {common_sections}")
 
         # Process sections incrementally
         section_summaries: Dict[str, str] = {}
@@ -265,9 +309,10 @@ class ComparisonEngine:
                 logger.error(f"Failed to compare section '{section}': {e}")
                 section_summaries[section] = f"[Error comparing {section}]"
 
-        # Generate final synthesis
+        # Generate final synthesis — cap each section summary to keep prompt bounded
+        capped_summaries = {k: v[:600] for k, v in section_summaries.items()}
         final_prompt = prompts.build_multi_paper_synthesis_prompt(
-            section_summaries=section_summaries,
+            section_summaries=capped_summaries,
             papers_metadata=papers_metadata,
         )
 

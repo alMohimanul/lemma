@@ -582,6 +582,21 @@ Write in formal academic prose. Do not introduce new citations.
 CONCLUSION:"""
 
 
+def build_map_section_prompt(section_name: str, section_text: str) -> str:
+    """Prompt to summarize a single paper section in 2-4 sentences.
+
+    Used by MapReduceSummarizer to compress each section before the reduce step.
+    """
+    return f"""Summarize the following {section_name} section of a research paper in 2-4 sentences.
+Preserve all technical terms, method names, metrics, and numbers exactly as stated.
+Use only the information provided — do not add outside knowledge.
+
+{section_name.upper()}:
+{section_text}
+
+SUMMARY:"""
+
+
 def build_paper_profile_prompt(
     title: str, authors: str, year: str, context: str
 ) -> str:

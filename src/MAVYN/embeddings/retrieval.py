@@ -196,17 +196,17 @@ _SUMMARY_ORDER = [
     "background",
 ]
 _SUMMARY_BUDGETS: Dict[str, int] = {
-    "abstract": 700,
-    "introduction": 400,
-    "conclusion": 400,
-    "results": 450,
-    "discussion": 300,
-    "methods": 300,
-    "methodology": 300,
-    "experiment": 300,
-    "related": 160,
-    "background": 160,
-    "_other": 120,
+    "abstract": 800,
+    "introduction": 700,
+    "conclusion": 650,
+    "results": 750,
+    "discussion": 600,
+    "methods": 650,
+    "methodology": 650,
+    "experiment": 600,
+    "related": 350,
+    "background": 350,
+    "_other": 250,
 }
 
 # ── Text helpers ──────────────────────────────────────────────────────────────
@@ -370,7 +370,7 @@ class HybridRetriever:
         self,
         question: str,
         query_vector,
-        top_k: int = 8,
+        top_k: int = 12,
         pinned_paper_ids: Optional[List[int]] = None,
         token_budget: int = TOKEN_BUDGET_QA,
     ) -> Tuple[str, List[int]]:
@@ -406,24 +406,23 @@ class HybridRetriever:
         for c in kw_chunks:  # keyword chunks may not overlap with dense
             chunk_map.setdefault((c.paper_id, c.chunk_index), c)
 
-        # ── Stage 5: Sentence extraction + MMR (max 3 chunks per paper) ───────
+        # ── Stage 5: Chunk selection (max 5 per paper, full text — budget enforced by pack_context) ─
         excerpts: List[Dict] = []
         paper_count: Dict[int, int] = {}
 
         for (pid, cidx), score in sorted_keys:
             if len(excerpts) >= top_k:
                 break
-            if paper_count.get(pid, 0) >= 3:
+            if paper_count.get(pid, 0) >= 5:
                 continue
             chunk = chunk_map.get((pid, cidx))
             if not chunk or not chunk.text_content:
                 continue
-            text = extract_sentences(chunk.text_content, question)
             excerpts.append(
                 {
                     "paper_id": pid,
                     "section": chunk.section_name or chunk.chunk_type or "Content",
-                    "text": text,
+                    "text": chunk.text_content,
                     "score": score * (chunk.importance_score or 0.5),
                 }
             )
@@ -443,7 +442,7 @@ class HybridRetriever:
                             {
                                 "paper_id": pid,
                                 "section": c.section_name or "Content",
-                                "text": extract_sentences(c.text_content, question),
+                                "text": c.text_content,
                                 "score": 0.05,
                             }
                         )
@@ -620,6 +619,31 @@ class AlignedExtractor:
         ]
         ctx = "Papers:\n" + "\n".join(legend) + "\n\n" + "\n\n".join(parts)
         return ctx, included or paper_ids
+
+
+# ── Full-paper section extraction (for map-reduce) ───────────────────────────
+
+
+def extract_sections_full(paper_id: int, repo) -> Dict[str, str]:
+    """Reassemble all chunks for a paper grouped by section, preserving order.
+
+    Returns an ordered dict: section_name → full section text (all chunks joined).
+    Used by MapReduceSummarizer to process each section independently.
+    """
+    chunks = repo.get_embeddings_by_paper(paper_id)
+    sections: Dict[str, List[str]] = {}
+    order: List[str] = []
+
+    for chunk in sorted(chunks, key=lambda c: int(c.chunk_index)):
+        if not chunk.text_content:
+            continue
+        section = (chunk.section_name or chunk.chunk_type or "_other").lower().strip()
+        if section not in sections:
+            sections[section] = []
+            order.append(section)
+        sections[section].append(str(chunk.text_content))
+
+    return {s: "\n\n".join(sections[s]) for s in order}
 
 
 # ── Task Router ───────────────────────────────────────────────────────────────

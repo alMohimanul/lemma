@@ -208,6 +208,18 @@ class SemanticSearchIndex:
 
             self.index = faiss.read_index(str(faiss_path))
 
+            # Detect embedding model change — dimension mismatch means the index
+            # was built with a different model and must be rebuilt from scratch.
+            if self.index.d != self.embedding_dim:
+                logger.warning(
+                    f"FAISS index dimension mismatch: index has d={self.index.d} "
+                    f"but current embedding model produces d={self.embedding_dim}. "
+                    f"Discarding stale index — re-run 'lemma embed' to rebuild."
+                )
+                self.index = faiss.IndexFlatL2(self.embedding_dim)
+                self.id_map = []
+                return False
+
             # Load ID mapping
             pkl_path = load_path.with_suffix(".pkl")
             if pkl_path.exists():

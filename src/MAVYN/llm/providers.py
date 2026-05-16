@@ -83,7 +83,6 @@ class GroqProvider(LLMProvider):
                 temperature=0.7,
                 top_p=1,
                 stream=True,
-                stream_options={"include_usage": True},
             )
             full_response = ""
             tokens_used = 0

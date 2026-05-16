@@ -23,6 +23,7 @@ if "HF_TOKEN" in os.environ:
 # Suppress all logging except critical errors
 logging.getLogger("transformers").setLevel(logging.ERROR)
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
 logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
 try:
@@ -54,7 +55,7 @@ class EmbeddingEncoder:
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
         self.model = SentenceTransformer(model_name)
-        self.embedding_dim = self.model.get_embedding_dimension()
+        self.embedding_dim = self.model.get_sentence_embedding_dimension()
 
     def encode(self, text: str) -> np.ndarray:
         """Encode a single text into an embedding vector.
